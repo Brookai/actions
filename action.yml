@@ -117,7 +117,18 @@ runs:
   - name: Install AWS CLI
     id: setup-aws-cli
     if: env.AWS_ENABLED == 'true' && inputs.cloud-cli == 'true'
-    uses: unfor19/install-aws-cli-action@v1
+    shell: bash
+    run: |
+      # Install AWS CLI v2 without external action dependency
+      if command -v aws &> /dev/null; then
+        echo "AWS CLI already installed: $(aws --version)"
+      else
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+        unzip -q /tmp/awscliv2.zip -d /tmp
+        sudo /tmp/aws/install --update
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+        echo "AWS CLI installed: $(aws --version)"
+      fi
 
   - name: Duplo JIT for AWS
     id: duplo-jit-aws

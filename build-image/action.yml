@@ -201,7 +201,13 @@ runs:
 
   - name: Expose GitHub Runtime
     if: steps.setup.outputs.buildx_enabled == 'true'
-    uses: crazy-max/ghaction-github-runtime@v3
+    shell: bash
+    run: |
+      # Expose GitHub Actions runtime environment variables for buildx cache
+      # This replaces crazy-max/ghaction-github-runtime@v3
+      echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> $GITHUB_ENV
+      echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> $GITHUB_ENV
+      echo "ACTIONS_RUNTIME_URL=${ACTIONS_RUNTIME_URL}" >> $GITHUB_ENV
 
   - name: Setup QEMU
     id: setup-qemu
