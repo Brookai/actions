@@ -1,0 +1,41 @@
+name: Security Scan
+description: Run IaC, secret, SAST, and image security scans via pinned docker images
+inputs:
+  enforce:
+    description: When "true", non-secret findings at HIGH/CRITICAL fail the job. Secret hits always fail.
+    required: false
+    default: "false"
+  scan-image:
+    description: When "true" and image-ref is set, also scan the container image (trivy, hadolint, syft SBOM).
+    required: false
+    default: "false"
+  image-ref:
+    description: Image reference to scan when scan-image is "true".
+    required: false
+    default: ""
+  path:
+    description: Path to scan for IaC, secrets, and SAST.
+    required: false
+    default: "."
+  report-dir:
+    description: Directory to write scan reports into.
+    required: false
+    default: "scan-reports"
+outputs:
+  result:
+    description: Overall scan result (pass or fail)
+    value: ${{ steps.scan.outputs.result }}
+runs:
+  using: composite
+  steps:
+
+  - name: Security Scan
+    id: scan
+    shell: bash
+    env:
+      ENFORCE: ${{ inputs.enforce }}
+      SCAN_IMAGE: ${{ inputs.scan-image }}
+      IMAGE_REF: ${{ inputs.image-ref }}
+      SCAN_PATH: ${{ inputs.path }}
+      REPORT_DIR: ${{ inputs.report-dir }}
+    run: $GITHUB_ACTION_PATH/scan.sh

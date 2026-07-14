@@ -1,0 +1,43 @@
+name: Wiz Scan
+description: Run Wiz IaC and image scans via the pinned wizcli binary
+inputs:
+  mode:
+    description: What to scan — iac, image, or both.
+    required: false
+    default: "both"
+  image-ref:
+    description: Image reference to scan when mode includes image.
+    required: false
+    default: ""
+  path:
+    description: Path to scan for IaC.
+    required: false
+    default: "."
+  enforce:
+    description: When "true", a Wiz policy failure fails the job.
+    required: false
+    default: "false"
+  wizcli-version:
+    description: wizcli version to download (1.x line).
+    required: false
+    default: "latest"
+outputs:
+  result:
+    description: Overall scan result (pass, fail, or skipped)
+    value: ${{ steps.wiz.outputs.result }}
+runs:
+  using: composite
+  steps:
+
+  - name: Wiz Scan
+    id: wiz
+    shell: bash
+    env:
+      MODE: ${{ inputs.mode }}
+      IMAGE_REF: ${{ inputs.image-ref }}
+      SCAN_PATH: ${{ inputs.path }}
+      ENFORCE: ${{ inputs.enforce }}
+      WIZCLI_VERSION: ${{ inputs.wizcli-version }}
+      WIZ_CLIENT_ID: ${{ env.WIZ_CLIENT_ID }}
+      WIZ_CLIENT_SECRET: ${{ env.WIZ_CLIENT_SECRET }}
+    run: $GITHUB_ACTION_PATH/wiz-scan.sh
