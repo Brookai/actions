@@ -8,7 +8,12 @@ mkdir -p "$SRC/$REPORT_DIR"
 
 # verify current version
 CHECKOV_IMAGE="bridgecrew/checkov:3.2.334"
-TRIVY_IMAGE="aquasecurity/trivy:0.58.1"
+# GHCR, not Docker Hub: "aquasecurity/trivy" does not exist on Docker Hub, so the pull
+# was denied and trivy silently never ran - it recorded WARN for "findings" it never
+# looked for. Aqua publish to ghcr.io/aquasecurity/trivy (canonical) and aquasec/trivy
+# (Docker Hub); GHCR keeps the aquasecurity org name and avoids Docker Hub rate limits,
+# which matter here since every scanner in this file is a container pull.
+TRIVY_IMAGE="ghcr.io/aquasecurity/trivy:0.58.1"
 TRUFFLEHOG_IMAGE="trufflesecurity/trufflehog:3.88.0"
 GITLEAKS_IMAGE="zricethezav/gitleaks:v8.21.2"
 SEMGREP_IMAGE="semgrep/semgrep:1.99.0"
