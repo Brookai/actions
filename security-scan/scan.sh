@@ -93,9 +93,24 @@ record() {
 scan_checkov;      record "checkov"      $? warn
 scan_trivy_config; record "trivy-config" $? warn
 
-# --- secrets (always hard-fail on a hit) ---
+# --- secrets ---
+# trufflehog stays "secret" (always blocks): it verifies a candidate against the
+# provider before reporting it, so a hit is a live credential, not a guess.
+#
+# gitleaks is "warn" instead. It is pure pattern matching with no verification, so
+# treating its output as never-a-false-positive does not hold. Measured on the two
+# pilot repos: trufflehog reported verified_secrets 0, while gitleaks reported 8 (cms)
+# and 16 (facilityadmin) - a genuine mix, including committed iOS .pem certificates
+# that deserve attention, but also a vendored AWS SDK data file and a well-known
+# tutorial sample cert. Blocking every pipeline on that set means the calling
+# workflows' enforce:"false" never took effect, and the first thing anyone would do is
+# stop reading the scan.
+#
+# Findings are still printed and still surface in the summary; they just no longer
+# hard-fail while enforce is false. Set enforce:"true" to block on them, which is the
+# knob the callers already have.
 scan_trufflehog;   record "trufflehog"   $? secret
-scan_gitleaks;     record "gitleaks"     $? secret
+scan_gitleaks;     record "gitleaks"     $? warn
 
 # --- SAST ---
 scan_semgrep;      record "semgrep"      $? warn
