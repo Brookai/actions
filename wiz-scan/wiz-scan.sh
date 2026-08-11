@@ -5,6 +5,7 @@ set -uo pipefail
 if [ -z "$WIZ_CLIENT_ID" ] || [ -z "$WIZ_CLIENT_SECRET" ]; then
   echo "::notice::Wiz creds not set — skipping (add WIZ_CLIENT_ID/WIZ_CLIENT_SECRET org secrets to enable)"
   echo "result=skipped" >> "$GITHUB_OUTPUT"
+  echo "#### 🛡️ wiz-scan — skipped (WIZ_CLIENT_ID/WIZ_CLIENT_SECRET org secrets not set)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 0
 fi
 
@@ -35,14 +36,17 @@ fi
 if [ "$fail" -eq 1 ] && [ "$ENFORCE" == "true" ]; then
   echo "result=fail" >> "$GITHUB_OUTPUT"
   echo "Overall: fail (enforce=true)"
+  echo "#### 🛡️ wiz-scan — ❌ FAIL (enforce=true, mode=$MODE)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 1
 fi
 
 if [ "$fail" -eq 1 ]; then
   echo "result=fail" >> "$GITHUB_OUTPUT"
   echo "Overall: fail (warn-only — set enforce=true to block)"
+  echo "#### 🛡️ wiz-scan — ⚠️ WARN (findings, warn-only, mode=$MODE)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 else
   echo "result=pass" >> "$GITHUB_OUTPUT"
   echo "Overall: pass"
+  echo "#### 🛡️ wiz-scan — ✅ PASS (mode=$MODE)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 fi
 exit 0
