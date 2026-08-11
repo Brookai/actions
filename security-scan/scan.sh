@@ -140,4 +140,25 @@ fi
 echo "result=$RESULT" >> "$GITHUB_OUTPUT"
 echo "Overall: $RESULT"
 
+# render the same summary as the GitHub Actions job summary so results are
+# visible on the run page without opening the step log
+{
+  echo "#### 🔒 security-scan — overall: $RESULT"
+  echo
+  echo "| status | tool |"
+  echo "|---|---|"
+  for line in "${SUMMARY[@]}"; do
+    status="${line%%  *}"
+    detail="${line#*  }"
+    case "$status" in
+      PASS) icon="✅" ;;
+      WARN) icon="⚠️" ;;
+      FAIL) icon="❌" ;;
+      SKIP) icon="⏭️" ;;
+      *) icon="•" ;;
+    esac
+    echo "| $icon $status | $detail |"
+  done
+} >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
 exit "$should_exit"
