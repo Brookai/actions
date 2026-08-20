@@ -5,6 +5,10 @@ inputs:
     description: When "true", non-secret findings at HIGH/CRITICAL fail the job. Secret hits always fail.
     required: false
     default: "false"
+  mode:
+    description: Which scans to run - "all", "source" (IaC, SCA, secrets, SAST, Dockerfile, source SBOM) or "image" (image CVEs + image SBOM only). Use "image" for a post-build step so the source scans are not repeated.
+    required: false
+    default: "all"
   scan-image:
     description: When "true" and image-ref is set, also scan the already-built container image (trivy image CVEs + image SBOM). Dockerfile lint and the source SBOM do not need this - they always run.
     required: false
@@ -33,6 +37,7 @@ runs:
     id: scan
     shell: bash
     env:
+      MODE: ${{ inputs.mode }}
       ENFORCE: ${{ inputs.enforce }}
       SCAN_IMAGE: ${{ inputs.scan-image }}
       IMAGE_REF: ${{ inputs.image-ref }}

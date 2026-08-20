@@ -6,6 +6,17 @@ set -uo pipefail
 SRC="$(cd "$SCAN_PATH" && pwd)"
 mkdir -p "$SRC/$REPORT_DIR"
 
+# MODE selects which half runs. "image" exists so a post-build step can scan the
+# artifact without repeating the source scans the PR-time run already did - that
+# duplication is the whole reason the image scan is a step and not a second job.
+MODE="${MODE:-all}"
+case "$MODE" in
+  all)    run_source=1; run_image=1 ;;
+  source) run_source=1; run_image=0 ;;
+  image)  run_source=0; run_image=1 ;;
+  *) echo "::error::mode must be all, source or image (got '$MODE')"; exit 2 ;;
+esac
+
 # verify current version
 CHECKOV_IMAGE="bridgecrew/checkov:3.2.334"
 # GHCR, not Docker Hub: "aquasecurity/trivy" does not exist on Docker Hub, so the pull
@@ -141,6 +152,8 @@ record() {
   fi
 }
 
+if [ "$run_source" -eq 1 ]; then
+
 # --- IaC misconfig ---
 scan_checkov;      record "checkov"      $? warn
 scan_trivy_config; record "trivy-config" $? warn
@@ -165,13 +178,19 @@ fi
 # --- source SBOM (no image required) ---
 scan_syft_source;  record "syft-sbom-source" $? warn
 
+else
+  SUMMARY+=("SKIP  source scans (mode=$MODE)")
+fi
+
 # --- image scans: need an image that already exists, so these only run when the
 # caller passes a ref (post-build in duplo-pipeline, not at PR time) ---
-if [ "$SCAN_IMAGE" == "true" ] && [ -n "$IMAGE_REF" ]; then
+if [ "$run_image" -eq 1 ] && [ "$SCAN_IMAGE" == "true" ] && [ -n "$IMAGE_REF" ]; then
   scan_trivy_image; record "trivy-image"     $? warn
   scan_syft_image;  record "syft-sbom-image" $? warn
-else
+elif [ "$run_image" -eq 1 ]; then
   SUMMARY+=("SKIP  image scans (scan-image!=true or image-ref empty)")
+else
+  SUMMARY+=("SKIP  image scans (mode=$MODE)")
 fi
 
 # --- summary ---
