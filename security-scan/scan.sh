@@ -34,6 +34,22 @@ SYFT_IMAGE="anchore/syft:v1.18.1"
 fail=0
 secret_hit=0
 
+# Private-registry auth for the image scans. trivy and syft run inside their own
+# containers, so they do NOT inherit the runner's ECR login - without this an ECR
+# image ref fails with a 401 that reads like the image does not exist. Two
+# mechanisms, both skipped silently when absent:
+#   - the runner's docker config, written by aws-actions/amazon-ecr-login inside
+#     build-image, mounted where the scanner containers look for it
+#   - AWS env credentials, which trivy and syft both understand natively for ECR
+REG_AUTH=()
+if [ -f "$HOME/.docker/config.json" ]; then
+  REG_AUTH+=(-v "$HOME/.docker/config.json:/root/.docker/config.json:ro")
+fi
+for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION AWS_DEFAULT_REGION; do
+  if [ -n "${!v:-}" ]; then REG_AUTH+=(-e "$v"); fi
+done
+# ${a[@]+"${a[@]}"} so an empty array does not trip set -u
+
 # --- tool functions (docker is the last statement so the function returns its exit code) ---
 
 scan_checkov() {
@@ -89,7 +105,7 @@ scan_semgrep() {
 
 scan_trivy_image() {
   echo "==> trivy image ($IMAGE_REF)"
-  docker run --rm -v "$SRC:/src" -w /src "$TRIVY_IMAGE" \
+  docker run --rm -v "$SRC:/src" -w /src ${REG_AUTH[@]+"${REG_AUTH[@]}"} "$TRIVY_IMAGE" \
     image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE_REF"
 }
 
@@ -125,9 +141,12 @@ scan_syft_source() {
 
 scan_syft_image() {
   echo "==> syft (image SBOM)"
-  docker run --rm -v "$SRC:/src" -w /src "$SYFT_IMAGE" \
-    "$IMAGE_REF" -o "cyclonedx-json=/src/$REPORT_DIR/sbom.cdx.json" \
-                 -o "spdx-json=/src/$REPORT_DIR/sbom.spdx.json"
+  # registry: prefix is explicit on purpose - a bare ref makes syft try the local
+  # docker daemon first, which never has the image because build-image pushes
+  # with --push and no --load.
+  docker run --rm -v "$SRC:/src" -w /src ${REG_AUTH[@]+"${REG_AUTH[@]}"} "$SYFT_IMAGE" \
+    "registry:$IMAGE_REF" -o "cyclonedx-json=/src/$REPORT_DIR/sbom.cdx.json" \
+                          -o "spdx-json=/src/$REPORT_DIR/sbom.spdx.json"
 }
 
 # record a tool result and update the fail/secret_hit flags
