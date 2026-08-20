@@ -33,8 +33,25 @@ scan_checkov() {
 
 scan_trivy_config() {
   echo "==> trivy config (IaC misconfig)"
+  # --exit-code 1 is REQUIRED. Without it trivy exits 0 even when it prints
+  # failures, so record() saw success and logged PASS while HIGH/CRITICAL
+  # misconfigurations sat in the output. Confirmed on ai-platform run
+  # 32284064305 (2026-08-19): "Failures: 4 (HIGH: 3, CRITICAL: 1)" -> "PASS".
   docker run --rm -v "$SRC:/src" -w /src "$TRIVY_IMAGE" \
-    config /src --severity HIGH,CRITICAL
+    config /src --severity HIGH,CRITICAL --exit-code 1
+}
+
+scan_trivy_fs() {
+  echo "==> trivy fs (dependency CVEs / SCA)"
+  # The dependency-CVE gate. Reads lockfiles and manifests out of the source
+  # tree (pom.xml, package-lock.json, requirements.txt, go.mod, composer.lock,
+  # build.gradle*) - no built image needed, so this runs on every PR.
+  # --scanners vuln keeps it to CVEs; secrets and misconfig are already covered
+  # by gitleaks/trufflehog and checkov/trivy-config, and running them twice here
+  # would double-report the same findings.
+  # --ignore-unfixed drops CVEs with no upstream fix, so the gate stays actionable.
+  docker run --rm -v "$SRC:/src" -w /src "$TRIVY_IMAGE" \
+    fs /src --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
 }
 
 scan_trufflehog() {
@@ -51,25 +68,55 @@ scan_gitleaks() {
 
 scan_semgrep() {
   echo "==> semgrep (SAST)"
+  # --error is REQUIRED for the same reason as trivy's --exit-code: semgrep scan
+  # exits 0 on findings by default. ai-platform run 32284064305 reported
+  # "170 findings" and still recorded PASS.
   docker run --rm -v "$SRC:/src" -w /src "$SEMGREP_IMAGE" \
-    semgrep --config=p/default --config=p/secrets --sarif --output="/src/$REPORT_DIR/semgrep.sarif" /src
+    semgrep --config=p/default --config=p/secrets --error \
+    --sarif --output="/src/$REPORT_DIR/semgrep.sarif" /src
 }
 
 scan_trivy_image() {
   echo "==> trivy image ($IMAGE_REF)"
   docker run --rm -v "$SRC:/src" -w /src "$TRIVY_IMAGE" \
-    image --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE_REF"
+    image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE_REF"
+}
+
+# Dockerfiles anywhere in the tree, not just at the root - healthslate-backend
+# keeps its at docker/Dockerfile, and a root-only check reads as "no Dockerfile".
+find_dockerfiles() {
+  find "$SRC" -type f \( -name Dockerfile -o -name 'Dockerfile.*' \) \
+    -not -path '*/node_modules/*' -not -path '*/vendor/*' -not -path '*/.git/*' \
+    -not -path "*/$REPORT_DIR/*" 2>/dev/null
 }
 
 scan_hadolint() {
   echo "==> hadolint (Dockerfile lint)"
-  docker run --rm -i "$HADOLINT_IMAGE" < "$SRC/Dockerfile"
+  # Was gated behind scan-image, which meant it never ran anywhere - it lints a
+  # Dockerfile and has never needed a built image.
+  local rc=0
+  while IFS= read -r df; do
+    [ -n "$df" ] || continue
+    echo "--- ${df#$SRC/}"
+    docker run --rm -i "$HADOLINT_IMAGE" < "$df" || rc=1
+  done <<< "$(find_dockerfiles)"
+  return $rc
 }
 
-scan_syft() {
-  echo "==> syft (SBOM)"
+scan_syft_source() {
+  echo "==> syft (source SBOM)"
+  # syft reads a directory as happily as an image, so the source SBOM is
+  # available on every PR without waiting for a build.
   docker run --rm -v "$SRC:/src" -w /src "$SYFT_IMAGE" \
-    "$IMAGE_REF" -o "cyclonedx-json=/src/$REPORT_DIR/sbom.cdx.json" -o "spdx-json=/src/$REPORT_DIR/sbom.spdx.json"
+    "dir:/src" -o "cyclonedx-json=/src/$REPORT_DIR/sbom-source.cdx.json" \
+               -o "spdx-json=/src/$REPORT_DIR/sbom-source.spdx.json"
+}
+
+scan_syft_image() {
+  echo "==> syft (image SBOM)"
+  docker run --rm -v "$SRC:/src" -w /src "$SYFT_IMAGE" \
+    "$IMAGE_REF" -o "cyclonedx-json=/src/$REPORT_DIR/sbom.cdx.json" \
+                 -o "spdx-json=/src/$REPORT_DIR/sbom.spdx.json"
 }
 
 # record a tool result and update the fail/secret_hit flags
@@ -98,6 +145,9 @@ record() {
 scan_checkov;      record "checkov"      $? warn
 scan_trivy_config; record "trivy-config" $? warn
 
+# --- dependency CVEs (SCA) ---
+scan_trivy_fs;     record "trivy-sca"    $? warn
+
 # --- secrets (always hard-fail on a hit) ---
 scan_trufflehog;   record "trufflehog"   $? secret
 scan_gitleaks;     record "gitleaks"     $? secret
@@ -105,15 +155,21 @@ scan_gitleaks;     record "gitleaks"     $? secret
 # --- SAST ---
 scan_semgrep;      record "semgrep"      $? warn
 
-# --- image scans (opt-in) ---
+# --- Dockerfile lint (no image required) ---
+if [ -n "$(find_dockerfiles)" ]; then
+  scan_hadolint;   record "hadolint"     $? warn
+else
+  SUMMARY+=("SKIP  hadolint (no Dockerfile found)")
+fi
+
+# --- source SBOM (no image required) ---
+scan_syft_source;  record "syft-sbom-source" $? warn
+
+# --- image scans: need an image that already exists, so these only run when the
+# caller passes a ref (post-build in duplo-pipeline, not at PR time) ---
 if [ "$SCAN_IMAGE" == "true" ] && [ -n "$IMAGE_REF" ]; then
-  scan_trivy_image; record "trivy-image" $? warn
-  if [ -f "$SRC/Dockerfile" ]; then
-    scan_hadolint;  record "hadolint"    $? warn
-  else
-    SUMMARY+=("SKIP  hadolint (no Dockerfile)")
-  fi
-  scan_syft;        record "syft-sbom"   $? warn
+  scan_trivy_image; record "trivy-image"     $? warn
+  scan_syft_image;  record "syft-sbom-image" $? warn
 else
   SUMMARY+=("SKIP  image scans (scan-image!=true or image-ref empty)")
 fi

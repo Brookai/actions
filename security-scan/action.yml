@@ -1,16 +1,16 @@
 name: Security Scan
-description: Run IaC, secret, SAST, and image security scans via pinned docker images
+description: Run IaC, dependency-CVE, secret, SAST, Dockerfile and image security scans via pinned docker images
 inputs:
   enforce:
     description: When "true", non-secret findings at HIGH/CRITICAL fail the job. Secret hits always fail.
     required: false
     default: "false"
   scan-image:
-    description: When "true" and image-ref is set, also scan the container image (trivy, hadolint, syft SBOM).
+    description: When "true" and image-ref is set, also scan the already-built container image (trivy image CVEs + image SBOM). Dockerfile lint and the source SBOM do not need this - they always run.
     required: false
     default: "false"
   image-ref:
-    description: Image reference to scan when scan-image is "true".
+    description: Image reference to scan when scan-image is "true". Must already exist - pass duplo-build's image_uri output rather than rebuilding.
     required: false
     default: ""
   path:
