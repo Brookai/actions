@@ -62,6 +62,8 @@ jobs:
       # Asserted via the step's output and the artifact, NOT via
       # $GITHUB_STEP_SUMMARY - Actions gives every step its own summary file, so
       # a later step reading that variable sees an empty file, not the scan's.
+      # No upload step here on purpose: the action uploads the reports itself now,
+      # and a second upload of the same directory just doubles artifact storage.
       - name: findings must be itemised
         run: |
           echo "findings=${{ steps.scan.outputs.findings }}"
@@ -70,11 +72,6 @@ jobs:
           test -s scan-reports/summary.md || { echo "::error::no summary.md rendered"; exit 1; }
           grep -q "<b>checkov</b>" scan-reports/summary.md || {
             echo "::error::checkov findings were not itemised"; cat scan-reports/summary.md; exit 1; }
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: selftest-source-reports
-          path: scan-reports
 
   image:
     name: real image scan
@@ -99,11 +96,6 @@ jobs:
             exit 1
           fi
           test -s scan-reports/sbom.cdx.json || { echo "::error::no image SBOM produced"; exit 1; }
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: selftest-image-reports
-          path: scan-reports
 
   unreachable-image:
     name: unreachable ref is a tool error, not a finding
