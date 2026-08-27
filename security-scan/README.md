@@ -132,11 +132,28 @@ Two things to get right:
 1. **Give the scan step the same `if:` guard as the build steps beside it.** In a repo with a `should_build` gate the build steps skip, and an unguarded scan step then runs with an empty `image-ref`, logs `SKIP image scans` and exits 0 — a green security check that scanned nothing, on every skipped build.
 2. **`mode: image` does no secret scanning.** That is correct where a PR-time source scan already exists, and wrong where it does not. Land the source-scan workflow in a repo before the image scan, or the repo ends up with image CVE scanning and no secret detection at all.
 
+## What the run page shows
+
+The job summary carries two things: the PASS / WARN / FAIL / TOOL-ERROR table per scanner, and
+underneath it **the findings themselves** — severity, rule, and `file:line`, grouped per scanner in
+collapsible sections. Past 25 findings for one scanner it rolls up by rule with counts and an
+example location, so a 400-CVE image report stays readable. Dependency and image CVEs carry the
+fixed-in version, which is usually the only thing you need to act.
+
+The same rendering goes to the step log, so it is readable in both places.
+
+**Rule and location only — never the matched value.** gitleaks and semgrep both carry the matching
+line in their SARIF, and a job summary is durable and widely readable. Locations are enough to act
+on. Full reports are in the `scan-reports` artifact.
+
+Rendering is done by `summarize.py` and can never change the scan result: if it fails, the scan
+verdict above it is unaffected and the step notes that the summary could not be rendered.
+
 ## Reports
 
 Scanning happens against a directory **outside** the checked-out tree, then the reports are copied into `report-dir` at the end. They used to be written inside it, which meant each scanner walked the earlier ones' output — a secret quoted in a SARIF finding snippet became a fresh finding of its own.
 
-SARIF from checkov, gitleaks and semgrep; CycloneDX + SPDX SBOMs from syft; console transcripts from the tools that only print (trivy, hadolint), so an SCA finding survives the run rather than living in a step log that ages out.
+SARIF from checkov, gitleaks and semgrep; JSON from the three trivy scans; CycloneDX + SPDX SBOMs from syft; console transcripts alongside, so a finding survives the run rather than living in a step log that ages out.
 
 ### Private-repo SARIF caveat
 

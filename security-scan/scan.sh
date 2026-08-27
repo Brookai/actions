@@ -183,8 +183,13 @@ scan_trivy_config() {
   # ref, a bad flag, a rate-limited DB download - so --exit-code 1 makes
   # "found misconfigurations" and "could not run" the same signal. 7 is
   # arbitrary but distinct, which is the entire point.
-  docker run --rm -v "$SRC:/src" -v "$TRIVY_CACHE:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" \
-    config /src --severity HIGH,CRITICAL --exit-code 7 2>&1 | tee "$REPORTS/trivy-config.txt"
+  # JSON, not the console table. The table cannot be itemised into the job
+  # summary, and trivy 0.58's console output is buried in rego parse warnings
+  # from its own built-in policy bundle. summarize.py renders the readable view
+  # from this file; stderr still streams progress to the step log.
+  docker run --rm -v "$SRC:/src" -v "$REPORTS:/reports" -v "$TRIVY_CACHE:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" \
+    config /src --severity HIGH,CRITICAL --exit-code 7 \
+    --format json --output /reports/trivy-config.json 2>&1 | tee "$REPORTS/trivy-config.txt"
 }
 
 scan_trivy_fs() {
@@ -202,9 +207,9 @@ scan_trivy_fs() {
   # that never reach a shipped image.
   local skip=()
   for d in "${EXCLUDE_DIRS[@]}"; do skip+=(--skip-dirs "/src/$d"); done
-  docker run --rm -v "$SRC:/src" -v "$TRIVY_CACHE:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" \
+  docker run --rm -v "$SRC:/src" -v "$REPORTS:/reports" -v "$TRIVY_CACHE:/root/.cache/trivy" -w /src "$TRIVY_IMAGE" \
     fs /src --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 7 \
-    "${skip[@]}" 2>&1 | tee "$REPORTS/trivy-sca.txt"
+    "${skip[@]}" --format json --output /reports/trivy-sca.json 2>&1 | tee "$REPORTS/trivy-sca.txt"
 }
 
 scan_trufflehog_fs() {
@@ -262,10 +267,10 @@ scan_trivy_image() {
   # prefix - trivy's default source order probes docker, containerd and podman
   # first, and no socket is mounted, so it spends the attempt failing to reach
   # daemons that are not there before falling through to the registry.
-  docker run --rm -v "$TRIVY_CACHE:/root/.cache/trivy" \
+  docker run --rm -v "$REPORTS:/reports" -v "$TRIVY_CACHE:/root/.cache/trivy" \
     ${REG_AUTH[@]+"${REG_AUTH[@]}"} ${TRIVY_AWS_AUTH[@]+"${TRIVY_AWS_AUTH[@]}"} "$TRIVY_IMAGE" \
     image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 7 \
-    --image-src remote "$IMAGE_REF" 2>&1 | tee "$REPORTS/trivy-image.txt"
+    --image-src remote --format json --output /reports/trivy-image.json "$IMAGE_REF" 2>&1 | tee "$REPORTS/trivy-image.txt"
 }
 
 # Dockerfiles anywhere in the tree, not just at the root - healthslate-backend
@@ -414,10 +419,10 @@ if [ "$run_source" -eq 1 ]; then
 
 # --- IaC misconfig ---
 scan_checkov;      record "checkov"      $? warn 1 "checkov.sarif"
-scan_trivy_config; record "trivy-config" $? warn 7
+scan_trivy_config; record "trivy-config" $? warn 7 "trivy-config.json"
 
 # --- dependency CVEs (SCA) ---
-scan_trivy_fs;     record "trivy-sca"    $? warn 7
+scan_trivy_fs;     record "trivy-sca"    $? warn 7 "trivy-sca.json"
 
 # --- secrets (always hard-fail on a hit) ---
 scan_trufflehog_fs;  record "trufflehog-fs"  $? secret 183
@@ -448,7 +453,7 @@ fi
 # --- image scans: need an image that already exists, so these only run when the
 # caller passes a ref (post-build in duplo-pipeline, not at PR time) ---
 if [ "$run_image" -eq 1 ] && [ "$SCAN_IMAGE" == "true" ] && [ -n "$IMAGE_REF" ]; then
-  scan_trivy_image; record "trivy-image"     $? warn 7
+  scan_trivy_image; record "trivy-image"     $? warn 7 "trivy-image.json"
   scan_syft_image;  record "syft-sbom-image" $? warn none "sbom.cdx.json"
 elif [ "$run_image" -eq 1 ]; then
   SUMMARY+=("SKIP  image scans (scan-image!=true or image-ref empty)")
@@ -517,5 +522,29 @@ fi
     echo "| $icon $status | $detail |"
   done
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# Itemise the findings underneath the table. The table says a scanner found
+# something; on its own that still means "go read the step log", which is the
+# complaint the summary was added to fix. summarize.py reads the scanners' own
+# report files and prints rule + severity + file:line - never a matched value.
+#
+# Never allowed to affect the result: this is reporting, and a reporting bug
+# must not turn into a scan verdict.
+# GITHUB_ACTION_PATH is only set when this runs as a composite action; fall back
+# to the script's own directory so a direct run (the self-test, or a local
+# reproduction) behaves the same. Unguarded it is an unbound-variable abort
+# under set -u, which would take the whole scan down at the last line.
+ACTION_DIR="${GITHUB_ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+if [ -x "$ACTION_DIR/summarize.py" ] && command -v python3 >/dev/null 2>&1; then
+  if FINDINGS_MD="$(REPORTS="$REPORTS" python3 "$ACTION_DIR/summarize.py" "$REPORTS" 2>/dev/null)"; then
+    if [ -n "$FINDINGS_MD" ]; then
+      printf '%s\n' "$FINDINGS_MD" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+      # and to the step log, so the findings are readable in both places
+      printf '%s\n' "$FINDINGS_MD" | sed -e 's/<[^>]*>//g' -e '/^$/d'
+    fi
+  else
+    echo "note: could not render the findings summary (the scan result above is unaffected)"
+  fi
+fi
 
 exit "$should_exit"

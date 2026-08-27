@@ -55,6 +55,16 @@ jobs:
             echo "::error::a scanner failed to run — see the TOOL-ERROR lines in the scan step"
             exit 1
           fi
+      # This repo's own workflows trip checkov and semgrep, so the itemised
+      # findings section must be present. Guards the reporting path: a summary
+      # that silently renders nothing is the failure mode this replaced.
+      - name: findings must be itemised in the job summary
+        run: |
+          test -s "$GITHUB_STEP_SUMMARY" || { echo "::error::no job summary written"; exit 1; }
+          grep -q "Findings —" "$GITHUB_STEP_SUMMARY" || {
+            echo "::error::job summary has no itemised findings section"; cat "$GITHUB_STEP_SUMMARY"; exit 1; }
+          grep -q "<b>checkov</b>" "$GITHUB_STEP_SUMMARY" || {
+            echo "::error::checkov findings were not itemised"; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

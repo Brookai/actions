@@ -49,11 +49,14 @@ for a in "$@"; do
 done
 if [ "${STUB_WRITE:-1}" = "1" ] && [ -n "$R" ]; then
   case "$tool" in
-    checkov)     echo '{}' > "$R/checkov.sarif" ;;
-    gitleaks)    echo '{}' > "$R/gitleaks.sarif" ;;
-    semgrep)     echo '{}' > "$R/semgrep.sarif" ;;
-    syft_source) echo '{}' > "$R/sbom-source.cdx.json" ;;
-    syft_image)  echo '{}' > "$R/sbom.cdx.json" ;;
+    checkov)      echo '{}' > "$R/checkov.sarif" ;;
+    gitleaks)     echo '{}' > "$R/gitleaks.sarif" ;;
+    semgrep)      echo '{}' > "$R/semgrep.sarif" ;;
+    syft_source)  echo '{}' > "$R/sbom-source.cdx.json" ;;
+    syft_image)   echo '{}' > "$R/sbom.cdx.json" ;;
+    trivy_config) echo '{}' > "$R/trivy-config.json" ;;
+    trivy_fs)     echo '{}' > "$R/trivy-sca.json" ;;
+    trivy_image)  echo '{}' > "$R/trivy-image.json" ;;
   esac
 fi
 exit "$rc"
@@ -123,6 +126,8 @@ assert "syft non-zero (1) -> TOOL-ERROR (it has no findings code)" 0 \
   "TOOL-ERROR  syft-sbom-source (exit 1" STUB_RC_syft_source=1
 assert "exit 0 having written no report -> TOOL-ERROR" 0 \
   "TOOL-ERROR  checkov (exit 0, wrote no checkov.sarif" STUB_WRITE=0
+assert "trivy exit 0 having written no report -> TOOL-ERROR" 0 \
+  "TOOL-ERROR  trivy-sca (exit 0, wrote no trivy-sca.json" STUB_WRITE=0
 assert "crash sharing the findings code (checkov 1, no report) -> TOOL-ERROR" 0 \
   "TOOL-ERROR  checkov (exit 1, wrote no checkov.sarif" STUB_RC_checkov=1 STUB_WRITE=0
 

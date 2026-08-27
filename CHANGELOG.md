@@ -17,6 +17,7 @@ and this project adheres to
 - security-scan: `tool-errors` output — the number of scanners that failed to run
 - security-scan: a `TOOL-ERROR` state distinct from findings, so a scanner that could not run is never reported as one that found something
 - security-scan: trufflehog now also scans **git history**; callers already checked out with `fetch-depth: 0` for it, but only gitleaks ever read it
+- security-scan: the job summary now **itemises the findings** — severity, rule and `file:line` per scanner, rolled up by rule past 25 — instead of only saying that a scanner found something. Rule and location only; matched values are never printed
 - security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run
 
 ### Fixed
@@ -37,6 +38,7 @@ and this project adheres to
 ### Changed
 - Updated ai-helpdesk action to display the first agent response in the summary by default with optional `hide_response` parameter
 - security-scan: `enforce: "true"` now also fails on scanner failures, not just findings
+- security-scan: the trivy scans emit JSON reports rather than console-only output, so their findings can be itemised and baselined
 
 ## [0.0.13] - 2025-09-23
 
