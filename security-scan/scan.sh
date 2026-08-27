@@ -535,16 +535,20 @@ fi
 # reproduction) behaves the same. Unguarded it is an unbound-variable abort
 # under set -u, which would take the whole scan down at the last line.
 ACTION_DIR="${GITHUB_ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+findings_total=0
 if [ -x "$ACTION_DIR/summarize.py" ] && command -v python3 >/dev/null 2>&1; then
-  if FINDINGS_MD="$(REPORTS="$REPORTS" python3 "$ACTION_DIR/summarize.py" "$REPORTS" 2>/dev/null)"; then
-    if [ -n "$FINDINGS_MD" ]; then
-      printf '%s\n' "$FINDINGS_MD" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  if n="$(REPORTS="$REPORTS" python3 "$ACTION_DIR/summarize.py" "$REPORTS" 2>/dev/null)"; then
+    case "$n" in (''|*[!0-9]*) : ;; (*) findings_total="$n" ;; esac
+    if [ -s "$REPORTS/summary.md" ]; then
+      cat "$REPORTS/summary.md" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
       # and to the step log, so the findings are readable in both places
-      printf '%s\n' "$FINDINGS_MD" | sed -e 's/<[^>]*>//g' -e '/^$/d'
+      sed -e 's/<[^>]*>//g' -e '/^$/d' "$REPORTS/summary.md"
+      cp "$REPORTS/summary.md" "$SRC/$REPORT_DIR/summary.md" 2>/dev/null || true
     fi
   else
     echo "note: could not render the findings summary (the scan result above is unaffected)"
   fi
 fi
+echo "findings=$findings_total" >> "${GITHUB_OUTPUT:-/dev/null}"
 
 exit "$should_exit"

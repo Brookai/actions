@@ -29,6 +29,9 @@ outputs:
   result:
     description: Overall scan result (pass or fail)
     value: ${{ steps.scan.outputs.result }}
+  findings:
+    description: Total number of findings itemised across all scanners. Reporting only - it does not affect result.
+    value: ${{ steps.scan.outputs.findings }}
   tool-errors:
     description: Number of scanners that failed to run. These are NOT findings - that coverage is simply missing from the result. Non-zero with result=pass means the scan was incomplete.
     value: ${{ steps.scan.outputs.tool-errors }}

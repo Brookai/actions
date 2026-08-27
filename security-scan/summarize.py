@@ -12,7 +12,10 @@ snippets, no matched text: gitleaks and semgrep both carry the matching line in
 their SARIF, and a job summary is a durable, widely-readable artifact. Locations
 are enough to act on; values never belong here.
 
-Reads $REPORTS. Writes markdown to stdout.
+Reads $REPORTS. Writes the markdown to $REPORTS/summary.md and prints the total
+finding count to stdout, so the caller can surface it as an action output.
+(A step cannot read another step's $GITHUB_STEP_SUMMARY - Actions gives each
+step its own file - so the count has to travel as an output, not a summary.)
 """
 import json, os, re, sys, collections
 
@@ -190,11 +193,21 @@ for name, fn in SOURCES:
     out.append("</details>")
     out.append("")
 
+md = []
 if total:
-    print("")
-    print(f"<h4>Findings — {total} total</h4>")
-    print("")
-    print("Rule and location only, by design; no matched values are printed here. "
-          "Full reports are in the `scan-reports` artifact on this run.")
-    print("")
-    print("\n".join(out))
+    md.append("")
+    md.append(f"<h4>Findings — {total} total</h4>")
+    md.append("")
+    md.append("Rule and location only, by design; no matched values are printed here. "
+              "Full reports are in the `scan-reports` artifact on this run.")
+    md.append("")
+    md.append("\n".join(out))
+
+if REPORTS:
+    try:
+        with open(os.path.join(REPORTS, "summary.md"), "w") as fh:
+            fh.write("\n".join(md))
+    except Exception:
+        pass
+
+print(total)
