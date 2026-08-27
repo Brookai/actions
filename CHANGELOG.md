@@ -12,9 +12,31 @@ and this project adheres to
 
 - New run-job action for running Kubernetes jobs via duploctl which deprecates the k8s-job action
 - Added var-files for terraform-exec action, to allow custom tfvars.json files to be used
+- security-scan: dependency-CVE scanning (`trivy fs`), the one category nothing covered — no SCA existed anywhere, not even disabled
+- security-scan: `mode` input (`all`/`source`/`image`, with `both`/`iac` accepted as aliases of the sibling wiz-scan vocabulary) so a post-build step can scan the image without repeating the source scans
+- security-scan: `tool-errors` output — the number of scanners that failed to run
+- security-scan: a `TOOL-ERROR` state distinct from findings, so a scanner that could not run is never reported as one that found something
+- security-scan: trufflehog now also scans **git history**; callers already checked out with `fetch-depth: 0` for it, but only gitleaks ever read it
+- security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run
+
+### Fixed
+
+- security-scan: `trivy config` and `semgrep` could never fail a build. Neither exits non-zero on findings without `--exit-code`/`--error`, so both logged `PASS` while printing HIGH/CRITICAL findings — only checkov, gitleaks and trufflehog were ever real gates, and `enforce: true` would not have changed that
+- security-scan: a scanner that failed to start was recorded as one that found things. With the secret category bypassing `enforce`, a denied image pull surfaced to the author as "you committed a secret". Every scanner now declares its findings exit code, and trivy/gitleaks were moved off the ambiguous `1` onto `--exit-code 7`
+- security-scan: checkov only ran `--framework terraform`, so in a repo with no Terraform it examined nothing and still logged `PASS`, while the kubernetes, dockerfile and github_actions files it could have checked went unscanned
+- security-scan: reports were written inside the tree being scanned, so each scanner walked the earlier ones' SARIF and a secret quoted in a finding snippet became a fresh finding. Scanning now happens outside the tree; reports are copied in at the end
+- security-scan: hadolint only checked `./Dockerfile`, missing repos that keep theirs at `docker/Dockerfile`, and matched `Dockerfile.*` widely enough to lint `.j2`/`.template`/`.bak` files that are not valid Dockerfile syntax
+- security-scan: scanner images were pinned by mutable tag; they are now pinned by digest
+- security-scan: a docker config using a credential helper was mounted into the scanner containers, where the helper binary does not exist — trivy died with a FATAL init error before looking at the image. Only inline `auths` entries are mounted now
+- security-scan: `AWS_*` credentials were forwarded to syft, which does not consume them for ECR, and forwarded even when the registry-scoped docker config was already mounted
+- security-scan: `trivy image` had no `--image-src remote` and probed absent docker/containerd/podman sockets first
+- security-scan: `trivy fs` and `syft` walked `.git` (full history), `node_modules` and `vendor`
+- security-scan: no shared trivy cache — `config`, `fs` and `image` each re-downloaded the vulnerability DB
+- security-scan: an invalid `mode` exited before writing the `result` output, so callers gating on `result != 'pass'` took the wrong branch
 
 ### Changed
 - Updated ai-helpdesk action to display the first agent response in the summary by default with optional `hide_response` parameter
+- security-scan: `enforce: "true"` now also fails on scanner failures, not just findings
 
 ## [0.0.13] - 2025-09-23
 
