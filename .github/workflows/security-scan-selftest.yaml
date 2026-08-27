@@ -1,0 +1,114 @@
+# Self-test for the security-scan action.
+#
+# This action had no test of any kind, and mode=image had never executed
+# anywhere - duplo-build.yaml does not run on pull requests, so its first run
+# would otherwise have been a real dev-branch build in a consuming repo. It is
+# about to be the pinned dependency of 23 pipeline steps across 21 repos.
+
+name: security-scan self-test
+
+on:
+  pull_request:
+    paths:
+      - 'security-scan/**'
+      - '.github/workflows/security-scan-selftest.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'security-scan/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: exit-code contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # docker is stubbed here, so this asserts the findings/tool-error mapping
+      # itself rather than the scanners. Fast, and it is the part that silently
+      # regressed before.
+      - run: security-scan/test/exit-code-contract.sh
+
+  source:
+    name: real source scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: source
+          enforce: "false"
+      - name: every scanner must have run
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" != "0" ]; then
+            echo "::error::a scanner failed to run — see the TOOL-ERROR lines in the scan step"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-source-reports
+          path: scan-reports
+
+  image:
+    name: real image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A public image, so this needs no registry credentials. It exercises the
+      # registry pull path, --image-src remote, and the syft registry: prefix -
+      # everything mode=image does apart from ECR auth.
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: image
+          scan-image: "true"
+          image-ref: alpine:3.14
+          enforce: "false"
+      - name: image scanners must have run
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" != "0" ]; then
+            echo "::error::an image scanner failed to run"
+            exit 1
+          fi
+          test -s scan-reports/sbom.cdx.json || { echo "::error::no image SBOM produced"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selftest-image-reports
+          path: scan-reports
+
+  unreachable-image:
+    name: unreachable ref is a tool error, not a finding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The regression that matters: an image that cannot be pulled must report
+      # TOOL-ERROR. It used to be recorded as "findings".
+      - id: scan
+        continue-on-error: true
+        uses: ./security-scan
+        with:
+          mode: image
+          scan-image: "true"
+          image-ref: 173008660334.dkr.ecr.us-east-1.amazonaws.com/does-not-exist:v0
+          enforce: "false"
+      - name: must report tool errors, not findings
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" == "0" ]; then
+            echo "::error::an unpullable image ref was not reported as a tool error"
+            exit 1
+          fi
