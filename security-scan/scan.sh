@@ -37,6 +37,13 @@ SRC="$(cd "$SCAN_PATH" && pwd)"
 # finding of its own. Scan into a temp dir, copy into the repo at the end once
 # nothing is left to walk.
 REPORTS="$(mktemp -d "${RUNNER_TEMP:-/tmp}/security-scan-reports.XXXXXX")"
+# Unique per invocation, written out immediately so it exists even if the scan
+# later fails. It names the uploaded artifact: billy, data-platform and
+# ai-platform each run several scan steps in ONE job, and upload-artifact@v4
+# hard-errors on a duplicate artifact name, so a fixed name would fail the build
+# of exactly the repos this is meant to protect.
+REPORT_ID="${REPORTS##*.}"
+echo "report-id=$REPORT_ID" >> "${GITHUB_OUTPUT:-/dev/null}"
 # Shared trivy DB cache across the config/fs/image invocations. Without it each
 # one runs in a fresh container and re-downloads the vulnerability DB - and the
 # fs scan additionally pulls the Java DB (hundreds of MB) wherever a .jar
@@ -462,9 +469,9 @@ else
 fi
 
 # --- reports back into the workspace ---------------------------------------
-# Copied only now that no scanner is left to walk the tree. Callers upload
-# "$REPORT_DIR" as a workflow artifact; the action uploads it too, so evidence
-# survives the run either way.
+# Copied only now that no scanner is left to walk the tree. The action uploads
+# this directory as a workflow artifact in the step after this one, so evidence
+# survives the run without every caller having to remember an upload step.
 mkdir -p "$SRC/$REPORT_DIR"
 cp -R "$REPORTS/." "$SRC/$REPORT_DIR/" 2>/dev/null || true
 

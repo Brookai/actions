@@ -32,6 +32,9 @@ outputs:
   findings:
     description: Total number of findings itemised across all scanners. Reporting only - it does not affect result.
     value: ${{ steps.scan.outputs.findings }}
+  report-id:
+    description: Unique id for this invocation, used to name the uploaded report artifact.
+    value: ${{ steps.scan.outputs.report-id }}
   tool-errors:
     description: Number of scanners that failed to run. These are NOT findings - that coverage is simply missing from the result. Non-zero with result=pass means the scan was incomplete.
     value: ${{ steps.scan.outputs.tool-errors }}
@@ -50,3 +53,19 @@ runs:
       SCAN_PATH: ${{ inputs.path }}
       REPORT_DIR: ${{ inputs.report-dir }}
     run: $GITHUB_ACTION_PATH/scan.sh
+
+  # The reports are the evidence. Without this they are written, copied into the
+  # workspace and thrown away when the job ends - which is what happened for
+  # every caller that did not add its own upload step, i.e. most of them.
+  #
+  # always(), because a failing scan is exactly when you want the reports.
+  # The name carries a per-invocation id: several repos run more than one scan
+  # step in a single job and upload-artifact@v4 rejects a duplicate name.
+  - name: Upload scan reports
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: security-scan-${{ steps.scan.outputs.report-id || github.run_id }}
+      path: ${{ inputs.path }}/${{ inputs.report-dir }}
+      if-no-files-found: ignore
+      retention-days: 30

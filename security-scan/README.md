@@ -104,13 +104,11 @@ jobs:
           path: "."
           report-dir: "scan-reports"
 
-      - name: Upload scan reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scan-reports
-          path: scan-reports
 ```
+
+The action uploads the reports itself as a `security-scan-<id>` artifact, so no caller needs an
+`upload-artifact` step. The id is per-invocation, because several repos run more than one scan step
+in a single job and `upload-artifact@v4` rejects a duplicate artifact name.
 
 ### Post-build image scan
 
@@ -144,7 +142,7 @@ The same rendering goes to the step log, so it is readable in both places.
 
 **Rule and location only — never the matched value.** gitleaks and semgrep both carry the matching
 line in their SARIF, and a job summary is durable and widely readable. Locations are enough to act
-on. Full reports are in the `scan-reports` artifact.
+on. Full reports are in the run's `security-scan-<id>` artifact.
 
 Rendering is done by `summarize.py` and can never change the scan result: if it fails, the scan
 verdict above it is unaffected and the step notes that the summary could not be rendered.
@@ -157,7 +155,7 @@ SARIF from checkov, gitleaks and semgrep; JSON from the three trivy scans; Cyclo
 
 ### Private-repo SARIF caveat
 
-Reports are meant to be uploaded as **workflow artifacts** (see the `upload-artifact` step above). We deliberately do **not** upload SARIF to the GitHub Security tab: code scanning on private repos requires GitHub Advanced Security (added cost) and pulls the results into Code Security, whose action/tooling allowlisting is ambiguous under the org's verified-only policy. Keep the evidence in artifacts and review it there.
+Reports are uploaded as a **workflow artifact** by the action. We deliberately do **not** upload SARIF to the GitHub Security tab: code scanning on private repos requires GitHub Advanced Security (added cost) and pulls the results into Code Security, whose action/tooling allowlisting is ambiguous under the org's verified-only policy. Keep the evidence in artifacts and review it there.
 
 ## Registry authentication for the image scans
 
