@@ -2,15 +2,15 @@ name: Security Scan
 description: Run IaC, dependency-CVE, secret, SAST, Dockerfile and image security scans via pinned docker images
 inputs:
   enforce:
-    description: When "true", non-secret findings at HIGH/CRITICAL fail the job. Secret hits always fail.
+    description: When "true", non-secret findings and scanner failures fail the job. Secret hits always fail regardless.
     required: false
     default: "false"
   mode:
-    description: Which scans to run - "all", "source" (IaC, SCA, secrets, SAST, Dockerfile, source SBOM) or "image" (image CVEs + image SBOM only). Use "image" for a post-build step so the source scans are not repeated.
+    description: Which scans to run - "all", "source" (IaC, SCA, secrets, SAST, Dockerfile lint, source SBOM) or "image" (image CVEs + image SBOM only). Use "image" for a post-build step so the source scans are not repeated. "both" and "iac" are accepted as aliases of "all" and "source", matching the sibling wiz-scan vocabulary.
     required: false
     default: "all"
   scan-image:
-    description: When "true" and image-ref is set, also scan the already-built container image (trivy image CVEs + image SBOM). Dockerfile lint and the source SBOM do not need this - they always run.
+    description: When "true" and image-ref is set, also scan the already-built container image (trivy image CVEs + image SBOM). Note this only has an effect while the image half is running - in mode "source" nothing image-related runs, and in mode "image" nothing else does.
     required: false
     default: "false"
   image-ref:
@@ -22,13 +22,16 @@ inputs:
     required: false
     default: "."
   report-dir:
-    description: Directory to write scan reports into.
+    description: Directory (inside the workspace) the scan reports are copied to when the run finishes. Scanning itself happens against a directory outside the tree so no scanner reads another's output.
     required: false
     default: "scan-reports"
 outputs:
   result:
     description: Overall scan result (pass or fail)
     value: ${{ steps.scan.outputs.result }}
+  tool-errors:
+    description: Number of scanners that failed to run. These are NOT findings - that coverage is simply missing from the result. Non-zero with result=pass means the scan was incomplete.
+    value: ${{ steps.scan.outputs.tool-errors }}
 runs:
   using: composite
   steps:
