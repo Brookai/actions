@@ -132,14 +132,22 @@ jobs:
       - name: only the third-party refs may be flagged
         run: |
           python3 - <<'PY'
-          import json, sys
+          import json, re
           d = json.load(open("fixture/scan-reports/semgrep.sarif"))
           res = [r for r in d["runs"][0]["results"] if not r.get("suppressions")]
-          lines = sorted(r["locations"][0]["physicalLocation"]["region"]["startLine"] for r in res)
           rules = {r["ruleId"].split(".")[-1] for r in res}
-          print("flagged lines:", lines, "rules:", rules)
-          # 10 = aquasecurity/trivy-action@master, 11 = some-random-org/dodgy-action@v1
-          assert lines == [10, 11], f"expected only the two third-party refs, got lines {lines}"
+          src = open("fixture/.github/workflows/demo.yml").read().splitlines()
+          # Assert on the owner that was flagged, not the line number - line
+          # numbers move whenever the fixture is edited and say nothing about
+          # whether the carve-out worked.
+          owners = set()
+          for r in res:
+              n = r["locations"][0]["physicalLocation"]["region"]["startLine"]
+              m = re.search(r"uses:\s*([^/\s]+)/", src[n - 1])
+              owners.add(m.group(1) if m else f"?line{n}")
+          print("flagged owners:", sorted(owners), "rules:", rules)
+          assert owners == {"aquasecurity", "some-random-org"}, (
+              f"expected only third-party owners flagged, got {sorted(owners)}")
           assert rules == {"mutable-third-party-action-tag"}, f"unexpected rules: {rules}"
           print("ok: actions/*, github/* and the SHA-pinned ref were all exempt")
           PY
