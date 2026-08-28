@@ -128,12 +128,38 @@ EXCLUDE_DIRS=(.git node_modules vendor)
 # the image does not exist.
 #
 # The mount is the mechanism. amazon-ecr-login (inside build-image) writes a
-# registry-scoped, short-lived token into the runner's docker config, and both
-# scanner images run as root with HOME=/root, so /root/.docker/config.json is
-# where they look. DOCKER_CONFIG is honoured because docker itself reads
-# ${DOCKER_CONFIG:-$HOME/.docker}/config.json, and a runner that sets it would
-# otherwise have its credentials silently left behind.
+# registry-scoped, short-lived token into the runner's docker config, which is
+# read at ${DOCKER_CONFIG:-$HOME/.docker}/config.json - a runner that sets
+# DOCKER_CONFIG would otherwise have its credentials silently left behind.
+#
+# It is delivered to the scanners by mounting the config DIRECTORY and setting
+# DOCKER_CONFIG inside the container, NOT by mounting the file at
+# /root/.docker/config.json. That earlier form assumed both images run as root
+# with HOME=/root. trivy does. syft does not, and the difference is invisible
+# until a real private registry is involved:
+#
+#   $ docker inspect anchore/syft:v1.18.1 --format '{{.Config.Env}}'
+#   [PATH=...]                      <- no HOME
+#   $ docker export <syft> | tar -t | awk -F/ '{print $1}' | sort -u
+#   dev etc proc syft sys tmp       <- no /root, no /etc/passwd
+#
+# With no passwd entry for uid 0, docker sets HOME=/, so syft's registry client
+# (go-containerregistry) looks in /.docker/config.json and never reads the file
+# mounted at /root/.docker/config.json. It does not warn - it simply
+# authenticates as nobody, which surfaces at the registry as:
+#
+#   ERROR could not determine source: ... oci-registry: failed to get image
+#   descriptor from registry: GET https://<acct>.dkr.ecr.<region>.amazonaws.com/
+#   v2/<repo>/manifests/<tag>: unexpected status code 401 Unauthorized
+#
+# That is what every caller hit on the first real ECR build (2026-08-28): trivy
+# scanned the image, syft returned TOOL-ERROR on all of them. Setting
+# DOCKER_CONFIG explicitly is HOME-independent, so it holds for both images and
+# for any scanner added later, whatever its base.
 DOCKER_CFG="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+# Where the config is mounted inside every scanner container. Anything outside
+# a home directory works; the point is that DOCKER_CONFIG names it explicitly.
+REG_CFG_DIR="/tmp/.docker-scan-auth"
 REG_AUTH=()
 have_docker_cfg=0
 if [ -f "$DOCKER_CFG" ]; then
@@ -150,7 +176,8 @@ if [ -f "$DOCKER_CFG" ]; then
   # on a GitHub runner this filter is a no-op; it stops any host with a helper
   # configured from turning the image scan into a hard error.
   if command -v python3 >/dev/null 2>&1; then
-    SANITIZED="$(mktemp "${RUNNER_TEMP:-/tmp}/docker-config.XXXXXX")"
+    SANITIZED_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/docker-config.XXXXXX")"
+    SANITIZED="$SANITIZED_DIR/config.json"
     if python3 -c '
 import json, sys
 try:
@@ -162,15 +189,17 @@ if not auths:
     sys.exit(1)
 json.dump({"auths": auths}, open(sys.argv[2], "w"))
 ' "$DOCKER_CFG" "$SANITIZED" 2>/dev/null; then
-      REG_AUTH+=(-v "$SANITIZED:/root/.docker/config.json:ro")
+      REG_AUTH+=(-v "$SANITIZED_DIR:$REG_CFG_DIR:ro" -e "DOCKER_CONFIG=$REG_CFG_DIR")
       have_docker_cfg=1
     else
-      rm -f "$SANITIZED"
+      rm -rf "$SANITIZED_DIR"
       echo "note: $DOCKER_CFG carries no inline registry credentials (credential helper only) — not mounting it"
     fi
   else
-    # no python3 to filter with; mount as-is and accept the helper risk
-    REG_AUTH+=(-v "$DOCKER_CFG:/root/.docker/config.json:ro")
+    # no python3 to filter with; mount as-is and accept the helper risk. The
+    # single file goes to $REG_CFG_DIR/config.json so DOCKER_CONFIG still names
+    # a directory, which is what docker and go-containerregistry both expect.
+    REG_AUTH+=(-v "$DOCKER_CFG:$REG_CFG_DIR/config.json:ro" -e "DOCKER_CONFIG=$REG_CFG_DIR")
     have_docker_cfg=1
   fi
 fi

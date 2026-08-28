@@ -189,7 +189,11 @@ Reports are uploaded as a **workflow artifact** by the action. We deliberately d
 
 ## Registry authentication for the image scans
 
-trivy and syft run inside their own containers, so they do not inherit the runner's ECR login. The action mounts the runner's docker config — the registry-scoped short-lived token `amazon-ecr-login` writes — into both, honouring `DOCKER_CONFIG`.
+trivy and syft run inside their own containers, so they do not inherit the runner's ECR login. The action mounts the runner's docker config — the registry-scoped short-lived token `amazon-ecr-login` writes — into both, reading it from `${DOCKER_CONFIG:-$HOME/.docker}/config.json` on the runner.
+
+It is delivered by mounting the config **directory** and setting `DOCKER_CONFIG` inside the container, rather than by mounting the file at `/root/.docker/config.json`. That distinction is not cosmetic. The earlier form assumed both scanner images run as root with `HOME=/root`; trivy does, and syft does not — its image has no `/etc/passwd` and no `/root`, so docker sets `HOME=/` and go-containerregistry looks in `/.docker/config.json`. syft therefore never saw the credentials, did not warn, and authenticated as nobody, which the registry returned as `401 Unauthorized`. Setting `DOCKER_CONFIG` explicitly does not depend on any image's `HOME`, so it holds for both and for anything added later.
+
+This is why a green run against a public image proves nothing about credential delivery: a public pull succeeds whether or not the scanner ever read the config. `security-scan/test/registry-auth.sh` covers it by running the real scanner images and asserting they read the config they are given.
 
 Only the inline `auths` entries are mounted. A config that delegates to a credential helper (`credsStore`, `credHelpers`) names a binary that does not exist inside the scanner container, and trivy dies with a FATAL init error before it looks at the image. `amazon-ecr-login` writes inline auths, so on a GitHub runner this filter is a no-op.
 

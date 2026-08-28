@@ -23,6 +23,7 @@ and this project adheres to
 - security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run
 
 ### Fixed
+- security-scan: the image scanners now receive registry credentials via `DOCKER_CONFIG` pointed at a mounted config directory, instead of a file mounted at `/root/.docker/config.json`. The old form assumed every scanner image runs as root with `HOME=/root` — true for trivy, false for syft, whose image has no `/etc/passwd` and no `/root`, so docker set `HOME=/` and syft read `/.docker/config.json`. It silently authenticated as nobody and every private-registry pull came back `401`. On the first real ECR builds across the fleet (2026-08-28) `trivy-image` scanned normally while `syft-sbom-image` returned `TOOL-ERROR` in every repo. The self-test had missed it because it scans a public image, which needs no credentials
 
 - security-scan: image scanning requested with an empty `image-ref` reported `SKIP` and `pass`, having scanned nothing — with `mode: image` that meant the entire run was a no-op reporting green. Now a `TOOL-ERROR`, and `mode: image` implies `scan-image` so the two inputs cannot disagree
 - security-scan: the git-history secret scan ran against repos with a `.git` directory but no commits, where trufflehog fails on the missing index — now an honest `SKIP`
