@@ -129,7 +129,11 @@ in a single job and `upload-artifact@v4` rejects a duplicate artifact name.
 Two things to get right:
 
 1. **Give the scan step the same `if:` guard as the build steps beside it.** In a repo with a `should_build` gate the build steps skip, and an unguarded scan step then runs with an empty `image-ref`, logs `SKIP image scans` and exits 0 — a green security check that scanned nothing, on every skipped build.
-2. **`mode: image` does no secret scanning.** That is correct where a PR-time source scan already exists, and wrong where it does not. Land the source-scan workflow in a repo before the image scan, or the repo ends up with image CVE scanning and no secret detection at all.
+2. **An empty `image-ref` is a TOOL-ERROR, not a skip.** If image scanning is requested and the ref
+   is empty, nothing was scanned and the run says so — with `mode: image` that means the source half
+   was skipped by mode and the image half by the missing ref, so the whole run scanned nothing. It
+   used to report `pass`.
+3. **`mode: image` does no secret scanning.** That is correct where a PR-time source scan already exists, and wrong where it does not. Land the source-scan workflow in a repo before the image scan, or the repo ends up with image CVE scanning and no secret detection at all.
 
 ## What the run page shows
 

@@ -14,7 +14,13 @@ MODE="${MODE:-all}"
 case "$MODE" in
   all|both)    run_source=1; run_image=1 ;;
   source|iac)  run_source=1; run_image=0 ;;
-  image)       run_source=0; run_image=1 ;;
+  image)       run_source=0; run_image=1
+               # mode=image IS the request for image scanning, so scan-image is
+               # redundant here. Force it rather than let the two inputs
+               # disagree - a caller that sets mode=image and leaves scan-image
+               # at its default would otherwise run nothing at all and be told
+               # everything passed.
+               SCAN_IMAGE="true" ;;
   *)
     echo "::error::mode must be all, source or image (got '$MODE')"
     # write the declared output before bailing - callers gate on
@@ -468,8 +474,14 @@ scan_trivy_fs;     record "trivy-sca"    $? warn 7 "trivy-sca.json"
 
 # --- secrets (always hard-fail on a hit) ---
 scan_trufflehog_fs;  record "trufflehog-fs"  $? secret 183
-if [ -d "$SRC/.git" ]; then
+# A .git directory is not enough: a repo that has been init'd but never
+# committed has no index, and trufflehog exits 1 with "failed to read index
+# file" - a tool error that is really just "there is no history here". Check for
+# a resolvable HEAD instead, so the degenerate case is an honest SKIP.
+if [ -d "$SRC/.git" ] && git -C "$SRC" rev-parse --verify -q HEAD >/dev/null 2>&1; then
   scan_trufflehog_git; record "trufflehog-git" $? secret 183
+elif [ -d "$SRC/.git" ]; then
+  SUMMARY+=("SKIP  trufflehog-git (git repo has no commits)")
 else
   SUMMARY+=("SKIP  trufflehog-git (no .git — checkout needs fetch-depth: 0)")
 fi
@@ -494,11 +506,29 @@ fi
 
 # --- image scans: need an image that already exists, so these only run when the
 # caller passes a ref (post-build in duplo-pipeline, not at PR time) ---
-if [ "$run_image" -eq 1 ] && [ "$SCAN_IMAGE" == "true" ] && [ -n "$IMAGE_REF" ]; then
+image_requested=0
+if [ "$run_image" -eq 1 ] && [ "$SCAN_IMAGE" == "true" ]; then image_requested=1; fi
+
+if [ "$image_requested" -eq 1 ] && [ -n "$IMAGE_REF" ]; then
   scan_trivy_image; record "trivy-image"     $? warn 7 "trivy-image.json"
   scan_syft_image;  record "syft-sbom-image" $? warn none "sbom.cdx.json"
+elif [ "$image_requested" -eq 1 ]; then
+  # Asked for, and could not happen. This used to fall through to a plain SKIP
+  # and exit 0 - which is the same defect this action was just fixed for
+  # everywhere else: the scan did not run and it reads as a pass. Worst case is
+  # mode=image with an empty ref, where the source half is skipped by mode and
+  # the image half by the missing ref, so NOTHING is scanned and the result is
+  # green.
+  #
+  # In practice it happens where the caller's scan step has no `if:` guard and
+  # sits beside build steps that do: on a skipped build the build step's uri
+  # output is empty, and the scan reports green having looked at nothing.
+  tool_errors=$((tool_errors + 1))
+  [ "$ENFORCE" == "true" ] && fail=1
+  SUMMARY+=("TOOL-ERROR  image scans (requested, but image-ref is empty — nothing was scanned)")
+  echo "::error::image scanning was requested (mode=$MODE, scan-image=$SCAN_IMAGE) but image-ref is empty, so no image was scanned. Guard the step on the build step's own output, e.g. if: steps.<build>.outputs.uri != ''"
 elif [ "$run_image" -eq 1 ]; then
-  SUMMARY+=("SKIP  image scans (scan-image!=true or image-ref empty)")
+  SUMMARY+=("SKIP  image scans (scan-image!=true)")
 else
   SUMMARY+=("SKIP  image scans (mode=$MODE)")
 fi

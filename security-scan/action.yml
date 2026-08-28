@@ -10,7 +10,12 @@ inputs:
     required: false
     default: "all"
   scan-image:
-    description: When "true" and image-ref is set, also scan the already-built container image (trivy image CVEs + image SBOM). Note this only has an effect while the image half is running - in mode "source" nothing image-related runs, and in mode "image" nothing else does.
+    description: >-
+      When "true" and image-ref is set, also scan the already-built container image (trivy image
+      CVEs + image SBOM). mode "image" implies this, so the two cannot disagree. If image scanning
+      is requested and image-ref is empty, that is reported as a TOOL-ERROR rather than a silent
+      skip - guard the caller's step on the build step's own output, e.g.
+      `if: steps.<build>.outputs.uri != ''`.
     required: false
     default: "false"
   image-ref:

@@ -20,10 +20,18 @@ SCAN_SH="$HERE/../scan.sh"
 [ -x "$SCAN_SH" ] || { echo "scan.sh not found or not executable at $SCAN_SH"; exit 1; }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/src/.git" "$WORK/bin" "$WORK/tmp"
+mkdir -p "$WORK/src" "$WORK/bin" "$WORK/tmp"
 echo "FROM alpine:3.19" > "$WORK/src/Dockerfile"
 echo "FROM alpine"      > "$WORK/src/Dockerfile.j2"   # not a Dockerfile; must be skipped
 echo "print('hi')"      > "$WORK/src/app.py"
+# A real repo with a commit, not just a .git directory: scan.sh skips the
+# git-history secret scan unless HEAD resolves, because a repo with no commits
+# has no index and trufflehog fails on it with a tool error that really means
+# "there is no history here".
+git -C "$WORK/src" init -q >/dev/null 2>&1
+git -C "$WORK/src" -c user.email=t@t -c user.name=t add -A >/dev/null 2>&1
+git -C "$WORK/src" -c user.email=t@t -c user.name=t -c commit.gpgsign=false \
+    commit -qm init >/dev/null 2>&1
 
 cat > "$WORK/bin/docker" <<'STUB'
 #!/usr/bin/env bash
@@ -136,6 +144,22 @@ assert "enforce=true + findings -> fail" 1 \
   "FAIL  trivy-sca (findings, enforce=true)" ENFORCE=true STUB_RC_trivy_fs=7
 assert "enforce=true + tool error -> fail (coverage hole)" 1 \
   "TOOL-ERROR  trivy-sca (exit 1" ENFORCE=true STUB_RC_trivy_fs=1
+
+# --- image scanning requested but impossible --------------------------------
+# Pedro's finding: this used to fall through to a plain SKIP and exit 0. With
+# mode=image the source half is skipped by mode and the image half by the
+# missing ref, so NOTHING is scanned and the run reports pass.
+assert "mode=image with an empty image-ref -> TOOL-ERROR, not a silent skip" 0 \
+  "TOOL-ERROR  image scans (requested, but image-ref is empty" MODE=image SCAN_IMAGE=true IMAGE_REF=""
+assert "mode=image implies scan-image, so the two inputs cannot disagree" 0 \
+  "TOOL-ERROR  image scans (requested, but image-ref is empty" MODE=image SCAN_IMAGE=false IMAGE_REF=""
+assert "scan-image=true with an empty ref is a tool error in any mode" 0 \
+  "TOOL-ERROR  image scans (requested, but image-ref is empty" MODE=all SCAN_IMAGE=true IMAGE_REF=""
+assert "enforce=true + an unscannable image ref fails the job" 1 \
+  "TOOL-ERROR  image scans (requested, but image-ref is empty" MODE=image SCAN_IMAGE=true IMAGE_REF="" ENFORCE=true
+# and the case that must NOT become an error: a plain source scan
+assert "mode=all without scan-image stays a plain SKIP" 0 \
+  "SKIP  image scans (scan-image!=true)" MODE=all SCAN_IMAGE=false IMAGE_REF=""
 
 # --- mode ------------------------------------------------------------------
 assert "invalid mode -> exit 2 and still writes result" 2 "" MODE=nonsense

@@ -24,6 +24,8 @@ and this project adheres to
 
 ### Fixed
 
+- security-scan: image scanning requested with an empty `image-ref` reported `SKIP` and `pass`, having scanned nothing — with `mode: image` that meant the entire run was a no-op reporting green. Now a `TOOL-ERROR`, and `mode: image` implies `scan-image` so the two inputs cannot disagree
+- security-scan: the git-history secret scan ran against repos with a `.git` directory but no commits, where trufflehog fails on the missing index — now an honest `SKIP`
 - security-scan: the job summary counted and displayed findings the scanner itself had **suppressed** (SARIF `suppressions[]`, from `# nosemgrep` / `checkov:skip=` annotations). The status row and the findings list contradicted each other — checkov reporting `Failed checks: 0` while the summary showed "checkov — 2 findings"
 
 - security-scan: `trivy config` and `semgrep` could never fail a build. Neither exits non-zero on findings without `--exit-code`/`--error`, so both logged `PASS` while printing HIGH/CRITICAL findings — only checkov, gitleaks and trufflehog were ever real gates, and `enforce: true` would not have changed that
