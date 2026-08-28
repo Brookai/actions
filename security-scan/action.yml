@@ -1,30 +1,57 @@
 name: Security Scan
-description: Run IaC, secret, SAST, and image security scans via pinned docker images
+description: Run IaC, dependency-CVE, secret, SAST, Dockerfile and image security scans via pinned docker images
 inputs:
   enforce:
-    description: When "true", non-secret findings at HIGH/CRITICAL fail the job. Secret hits always fail.
+    description: When "true", non-secret findings and scanner failures fail the job. Secret hits always fail regardless.
     required: false
     default: "false"
+  mode:
+    description: Which scans to run - "all", "source" (IaC, SCA, secrets, SAST, Dockerfile lint, source SBOM) or "image" (image CVEs + image SBOM only). Use "image" for a post-build step so the source scans are not repeated. "both" and "iac" are accepted as aliases of "all" and "source", matching the sibling wiz-scan vocabulary.
+    required: false
+    default: "all"
   scan-image:
-    description: When "true" and image-ref is set, also scan the container image (trivy, hadolint, syft SBOM).
+    description: >-
+      When "true" and image-ref is set, also scan the already-built container image (trivy image
+      CVEs + image SBOM). mode "image" implies this, so the two cannot disagree. If image scanning
+      is requested and image-ref is empty, that is reported as a TOOL-ERROR rather than a silent
+      skip - guard the caller's step on the build step's own output, e.g.
+      `if: steps.<build>.outputs.uri != ''`.
     required: false
     default: "false"
   image-ref:
-    description: Image reference to scan when scan-image is "true".
+    description: Image reference to scan when scan-image is "true". Must already exist - pass duplo-build's image_uri output rather than rebuilding.
     required: false
     default: ""
+  semgrep-first-party-owners:
+    description: >-
+      Comma-separated GitHub owners treated as first-party for the action-pinning check.
+      semgrep's github-actions-mutable-action-tag rule cannot distinguish action owners, so it
+      flags GitHub's own actions/* as loudly as a stranger's repo - roughly 70% of all semgrep
+      findings across this org. Owners listed here are exempted and the rule is replaced with one
+      that fires only on everyone else. Set to "" to keep the unmodified upstream rule.
+    required: false
+    default: "actions,github"
   path:
     description: Path to scan for IaC, secrets, and SAST.
     required: false
     default: "."
   report-dir:
-    description: Directory to write scan reports into.
+    description: Directory (inside the workspace) the scan reports are copied to when the run finishes. Scanning itself happens against a directory outside the tree so no scanner reads another's output.
     required: false
     default: "scan-reports"
 outputs:
   result:
     description: Overall scan result (pass or fail)
     value: ${{ steps.scan.outputs.result }}
+  findings:
+    description: Total number of findings itemised across all scanners. Reporting only - it does not affect result.
+    value: ${{ steps.scan.outputs.findings }}
+  report-id:
+    description: Unique id for this invocation, used to name the uploaded report artifact.
+    value: ${{ steps.scan.outputs.report-id }}
+  tool-errors:
+    description: Number of scanners that failed to run. These are NOT findings - that coverage is simply missing from the result. Non-zero with result=pass means the scan was incomplete.
+    value: ${{ steps.scan.outputs.tool-errors }}
 runs:
   using: composite
   steps:
@@ -33,9 +60,27 @@ runs:
     id: scan
     shell: bash
     env:
+      MODE: ${{ inputs.mode }}
       ENFORCE: ${{ inputs.enforce }}
       SCAN_IMAGE: ${{ inputs.scan-image }}
       IMAGE_REF: ${{ inputs.image-ref }}
+      SEMGREP_FIRST_PARTY_OWNERS: ${{ inputs.semgrep-first-party-owners }}
       SCAN_PATH: ${{ inputs.path }}
       REPORT_DIR: ${{ inputs.report-dir }}
     run: $GITHUB_ACTION_PATH/scan.sh
+
+  # The reports are the evidence. Without this they are written, copied into the
+  # workspace and thrown away when the job ends - which is what happened for
+  # every caller that did not add its own upload step, i.e. most of them.
+  #
+  # always(), because a failing scan is exactly when you want the reports.
+  # The name carries a per-invocation id: several repos run more than one scan
+  # step in a single job and upload-artifact@v4 rejects a duplicate name.
+  - name: Upload scan reports
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: security-scan-${{ steps.scan.outputs.report-id || github.run_id }}
+      path: ${{ inputs.path }}/${{ inputs.report-dir }}
+      if-no-files-found: ignore
+      retention-days: 30

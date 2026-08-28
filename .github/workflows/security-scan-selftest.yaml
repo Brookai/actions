@@ -1,0 +1,176 @@
+# Self-test for the security-scan action.
+#
+# This action had no test of any kind, and mode=image had never executed
+# anywhere - duplo-build.yaml does not run on pull requests, so its first run
+# would otherwise have been a real dev-branch build in a consuming repo. It is
+# about to be the pinned dependency of 23 pipeline steps across 21 repos.
+
+name: security-scan self-test
+
+on:
+  pull_request:
+    paths:
+      - 'security-scan/**'
+      - '.github/workflows/security-scan-selftest.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'security-scan/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: exit-code contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # docker is stubbed here, so this asserts the findings/tool-error mapping
+      # itself rather than the scanners. Fast, and it is the part that silently
+      # regressed before.
+      - run: security-scan/test/exit-code-contract.sh
+      - run: security-scan/test/summary-rendering.sh
+
+  source:
+    name: real source scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: source
+          enforce: "false"
+      - name: every scanner must have run
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" != "0" ]; then
+            echo "::error::a scanner failed to run — see the TOOL-ERROR lines in the scan step"
+            exit 1
+          fi
+      # This repo's own workflows trip checkov and semgrep, so findings must be
+      # itemised. Guards the reporting path: a summary that silently renders
+      # nothing is the failure mode this replaced.
+      #
+      # Asserted via the step's output and the artifact, NOT via
+      # $GITHUB_STEP_SUMMARY - Actions gives every step its own summary file, so
+      # a later step reading that variable sees an empty file, not the scan's.
+      # No upload step here on purpose: the action uploads the reports itself now,
+      # and a second upload of the same directory just doubles artifact storage.
+      - name: findings must be itemised
+        run: |
+          echo "findings=${{ steps.scan.outputs.findings }}"
+          [ "${{ steps.scan.outputs.findings }}" -gt 0 ] || {
+            echo "::error::no findings itemised, but this repo's workflows trip checkov"; exit 1; }
+          test -s scan-reports/summary.md || { echo "::error::no summary.md rendered"; exit 1; }
+          grep -q "<b>checkov</b>" scan-reports/summary.md || {
+            echo "::error::checkov findings were not itemised"; cat scan-reports/summary.md; exit 1; }
+
+  image:
+    name: real image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A public image, so this needs no registry credentials. It exercises the
+      # registry pull path, --image-src remote, and the syft registry: prefix -
+      # everything mode=image does apart from ECR auth.
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: image
+          scan-image: "true"
+          image-ref: alpine:3.14
+          enforce: "false"
+      - name: image scanners must have run
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" != "0" ]; then
+            echo "::error::an image scanner failed to run"
+            exit 1
+          fi
+          test -s scan-reports/sbom.cdx.json || { echo "::error::no image SBOM produced"; exit 1; }
+
+  # The action-pinning carve-out. semgrep's upstream rule cannot tell action
+  # owners apart, so it fired on GitHub's own actions/* as loudly as on a
+  # stranger's repo - ~70% of every semgrep finding in this org. Asserts the
+  # replacement still catches genuine third-party mutable tags.
+  first-party-carve-out:
+    name: action-pinning carve-out
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build a fixture with mixed owners
+        run: |
+          mkdir -p fixture/.github/workflows
+          cat > fixture/.github/workflows/demo.yml <<'EOF'
+          name: demo
+          on: [push]
+          jobs:
+            a:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: github/codeql-action/analyze@v3
+                - uses: aquasecurity/trivy-action@master
+                - uses: some-random-org/dodgy-action@v1
+                - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+          EOF
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: source
+          path: fixture
+          enforce: "false"
+      - name: only the third-party refs may be flagged
+        run: |
+          python3 - <<'PY'
+          import json, re
+          d = json.load(open("fixture/scan-reports/semgrep.sarif"))
+          res = [r for r in d["runs"][0]["results"] if not r.get("suppressions")]
+          rules = {r["ruleId"].split(".")[-1] for r in res}
+          src = open("fixture/.github/workflows/demo.yml").read().splitlines()
+          # Assert on the owner that was flagged, not the line number - line
+          # numbers move whenever the fixture is edited and say nothing about
+          # whether the carve-out worked.
+          owners = set()
+          for r in res:
+              n = r["locations"][0]["physicalLocation"]["region"]["startLine"]
+              m = re.search(r"uses:\s*([^/\s]+)/", src[n - 1])
+              owners.add(m.group(1) if m else f"?line{n}")
+          print("flagged owners:", sorted(owners), "rules:", rules)
+          assert owners == {"aquasecurity", "some-random-org"}, (
+              f"expected only third-party owners flagged, got {sorted(owners)}")
+          assert rules == {"mutable-third-party-action-tag"}, f"unexpected rules: {rules}"
+          print("ok: actions/*, github/* and the SHA-pinned ref were all exempt")
+          PY
+
+  unreachable-image:
+    name: unreachable ref is a tool error, not a finding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The regression that matters: an image that cannot be pulled must report
+      # TOOL-ERROR. It used to be recorded as "findings".
+      - id: scan
+        continue-on-error: true
+        uses: ./security-scan
+        with:
+          mode: image
+          scan-image: "true"
+          image-ref: 173008660334.dkr.ecr.us-east-1.amazonaws.com/does-not-exist:v0
+          enforce: "false"
+      - name: must report tool errors, not findings
+        run: |
+          echo "result=${{ steps.scan.outputs.result }} tool-errors=${{ steps.scan.outputs.tool-errors }}"
+          if [ "${{ steps.scan.outputs.tool-errors }}" == "0" ]; then
+            echo "::error::an unpullable image ref was not reported as a tool error"
+            exit 1
+          fi
