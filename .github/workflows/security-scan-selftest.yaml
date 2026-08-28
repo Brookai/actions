@@ -35,6 +35,7 @@ jobs:
       # itself rather than the scanners. Fast, and it is the part that silently
       # regressed before.
       - run: security-scan/test/exit-code-contract.sh
+      - run: security-scan/test/summary-rendering.sh
 
   source:
     name: real source scan
@@ -96,6 +97,52 @@ jobs:
             exit 1
           fi
           test -s scan-reports/sbom.cdx.json || { echo "::error::no image SBOM produced"; exit 1; }
+
+  # The action-pinning carve-out. semgrep's upstream rule cannot tell action
+  # owners apart, so it fired on GitHub's own actions/* as loudly as on a
+  # stranger's repo - ~70% of every semgrep finding in this org. Asserts the
+  # replacement still catches genuine third-party mutable tags.
+  first-party-carve-out:
+    name: action-pinning carve-out
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build a fixture with mixed owners
+        run: |
+          mkdir -p fixture/.github/workflows
+          cat > fixture/.github/workflows/demo.yml <<'EOF'
+          name: demo
+          on: [push]
+          jobs:
+            a:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: github/codeql-action/analyze@v3
+                - uses: aquasecurity/trivy-action@master
+                - uses: some-random-org/dodgy-action@v1
+                - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+          EOF
+      - id: scan
+        uses: ./security-scan
+        with:
+          mode: source
+          path: fixture
+          enforce: "false"
+      - name: only the third-party refs may be flagged
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("fixture/scan-reports/semgrep.sarif"))
+          res = [r for r in d["runs"][0]["results"] if not r.get("suppressions")]
+          lines = sorted(r["locations"][0]["physicalLocation"]["region"]["startLine"] for r in res)
+          rules = {r["ruleId"].split(".")[-1] for r in res}
+          print("flagged lines:", lines, "rules:", rules)
+          # 10 = aquasecurity/trivy-action@master, 11 = some-random-org/dodgy-action@v1
+          assert lines == [10, 11], f"expected only the two third-party refs, got lines {lines}"
+          assert rules == {"mutable-third-party-action-tag"}, f"unexpected rules: {rules}"
+          print("ok: actions/*, github/* and the SHA-pinned ref were all exempt")
+          PY
 
   unreachable-image:
     name: unreachable ref is a tool error, not a finding

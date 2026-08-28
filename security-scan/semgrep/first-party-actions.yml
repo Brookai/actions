@@ -1,0 +1,41 @@
+# Replacement for semgrep's github-actions-mutable-action-tag.
+#
+# The upstream rule is right about the risk and wrong about the blast radius: it
+# makes no distinction by action owner, so it fires on GitHub's own actions/*
+# exactly as loudly as on a stranger's repo. In Brook's repos essentially every
+# unpinned ref is first-party, so the rule was ~70% of all semgrep findings
+# across the fleet and drowned out everything else. care-nexus #451 SHA-pinned
+# 35 refs to satisfy it and then reverted the lot, because the work was real and
+# the finding was not.
+#
+# So: the upstream rule is excluded and this replaces it, firing only on owners
+# that are NOT first-party. Same risk, without the noise that made it unreadable.
+#
+# __FIRST_PARTY_OWNERS__ is substituted at runtime from the action's
+# `semgrep-first-party-owners` input - do not hand-edit the placeholder.
+rules:
+  - id: mutable-third-party-action-tag
+    languages: [yaml]
+    severity: WARNING
+    message: >-
+      Third-party GitHub Action pinned to a mutable tag or branch. Whoever owns
+      that repository can silently repoint the tag at different code, which then
+      runs in this workflow with its token. Pin to a full 40-character commit
+      SHA. First-party actions are exempt from this check by configuration.
+    metadata:
+      category: security
+      cwe: "CWE-1357: Reliance on Insufficiently Trustworthy Component"
+      references:
+        - https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+    patterns:
+      # uses: owner/repo@ref, where ref is not a 40-hex commit SHA
+      - pattern-regex: '(?<![\w-])uses:\s*(?P<REF>[A-Za-z0-9._-]+/[^\s@]+@(?!\b[0-9a-f]{40}\b)[^\s]+)'
+      - metavariable-regex:
+          metavariable: $REF
+          regex: '^(?!(__FIRST_PARTY_OWNERS__)/)'
+    paths:
+      include:
+        - '.github/workflows/*.yml'
+        - '.github/workflows/*.yaml'
+        - '.github/actions/**/*.yml'
+        - '.github/actions/**/*.yaml'

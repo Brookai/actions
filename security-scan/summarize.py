@@ -69,6 +69,20 @@ def from_sarif(name, sev_from_props=None):
         for r in (run.get("tool", {}).get("driver", {}).get("rules") or []):
             rules[r.get("id")] = r
         for res in run.get("results", []):
+            # A result the tool itself suppressed is not a finding. SARIF marks
+            # these with a suppressions[] entry - kind "inSource" for an
+            # in-code annotation (# nosemgrep, checkov:skip=...). The tool has
+            # already honoured them: its exit code and its own tally exclude
+            # them, so counting them here contradicts the status row directly.
+            # Observed on care-nexus run 33128486556, where checkov reported
+            # "Failed checks: 0, Skipped checks: 2" - it passed - while this
+            # summary rendered "checkov - 2 findings".
+            #
+            # Someone who writes a justified suppression should see the backlog
+            # go down. Otherwise the number never moves and the summary stops
+            # being worth reading, which defeats the point of having it.
+            if res.get("suppressions"):
+                continue
             rid = res.get("ruleId") or "?"
             rule = rules.get(rid) or {}
             rprops = rule.get("properties") or {}

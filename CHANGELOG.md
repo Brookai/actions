@@ -17,11 +17,14 @@ and this project adheres to
 - security-scan: `tool-errors` output — the number of scanners that failed to run
 - security-scan: a `TOOL-ERROR` state distinct from findings, so a scanner that could not run is never reported as one that found something
 - security-scan: trufflehog now also scans **git history**; callers already checked out with `fetch-depth: 0` for it, but only gitleaks ever read it
+- security-scan: `semgrep-first-party-owners` input — semgrep's action-pinning rule cannot distinguish action owners and flagged GitHub's own `actions/*` as loudly as a stranger's repo (~70% of all semgrep findings across the org). It is now replaced with a rule that fires only on owners outside the allowlist
 - security-scan: the action now uploads the scan reports as a workflow artifact itself, named per invocation. They were previously written, copied into the workspace and discarded unless the caller happened to add its own upload step
 - security-scan: the job summary now **itemises the findings** — severity, rule and `file:line` per scanner, rolled up by rule past 25 — instead of only saying that a scanner found something. Rule and location only; matched values are never printed
 - security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run
 
 ### Fixed
+
+- security-scan: the job summary counted and displayed findings the scanner itself had **suppressed** (SARIF `suppressions[]`, from `# nosemgrep` / `checkov:skip=` annotations). The status row and the findings list contradicted each other — checkov reporting `Failed checks: 0` while the summary showed "checkov — 2 findings"
 
 - security-scan: `trivy config` and `semgrep` could never fail a build. Neither exits non-zero on findings without `--exit-code`/`--error`, so both logged `PASS` while printing HIGH/CRITICAL findings — only checkov, gitleaks and trufflehog were ever real gates, and `enforce: true` would not have changed that
 - security-scan: a scanner that failed to start was recorded as one that found things. With the secret category bypassing `enforce`, a denied image pull surfaced to the author as "you committed a secret". Every scanner now declares its findings exit code, and trivy/gitleaks were moved off the ambiguous `1` onto `--exit-code 7`

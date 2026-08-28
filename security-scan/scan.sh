@@ -26,6 +26,12 @@ case "$MODE" in
     ;;
 esac
 
+# GITHUB_ACTION_PATH is only set when this runs as a composite action; fall back
+# to the script's own directory so a direct run (the self-test, or a local
+# reproduction) behaves the same. Unguarded it is an unbound-variable abort
+# under set -u.
+ACTION_DIR="${GITHUB_ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
 # resolve the scan path
 SRC="$(cd "$SCAN_PATH" && pwd)"
 
@@ -79,6 +85,29 @@ SYFT_IMAGE="anchore/syft@sha256:b8c170b8e51bfc4779ec3ef4399942c57290f5ce76a9c3af
 fail=0
 secret_hit=0
 tool_errors=0
+
+# --- semgrep: first-party action-pinning carve-out ---------------------------
+#
+# semgrep's github-actions-mutable-action-tag makes no distinction by action
+# owner, so it flags GitHub's own actions/* as loudly as a stranger's repo. In
+# this org essentially every unpinned ref is first-party, which made that single
+# rule ~70% of all semgrep findings and buried everything else. Excluded here and
+# replaced with a rule that fires only on owners outside the allowlist, so the
+# supply-chain check survives without the noise.
+MUTABLE_TAG_RULE="yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
+SEMGREP_EXTRA=()
+FIRST_PARTY="$(printf '%s' "${SEMGREP_FIRST_PARTY_OWNERS:-}" | tr -d '[:space:]' | tr ',' '|' | sed 's/^|*//; s/|*$//')"
+if [ -n "$FIRST_PARTY" ] && [ -f "$ACTION_DIR/semgrep/first-party-actions.yml" ]; then
+  RULES_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/semgrep-rules.XXXXXX")"
+  # '#' as the delimiter, not '|': $FIRST_PARTY is a regex alternation
+  # ("actions|github"), so a '|' delimiter splits the s/// mid-replacement and
+  # sed writes nothing - semgrep then reports "Empty configuration file" and
+  # exits 7. GitHub owner names cannot contain '#'.
+  sed "s#__FIRST_PARTY_OWNERS__#${FIRST_PARTY}#" \
+    "$ACTION_DIR/semgrep/first-party-actions.yml" > "$RULES_DIR/first-party-actions.yml"
+  SEMGREP_EXTRA=(-v "$RULES_DIR:/rules:ro")
+  echo "semgrep: exempting first-party action owners ($FIRST_PARTY) from the mutable-tag rule"
+fi
 
 # Directories no scanner should walk. .git is in here because callers check out
 # with fetch-depth: 0, so it holds the entire history - syft and trivy fs would
@@ -263,8 +292,14 @@ scan_semgrep() {
   # -positive tail of - whereas the secret category hard-fails past enforce and
   # is reserved for trufflehog's provider-verified hits. Documented in the
   # README so the gating contract is not a surprise.
-  docker run --rm -v "$SRC:/src" -v "$REPORTS:/reports" -w /src "$SEMGREP_IMAGE" \
-    semgrep --config=p/default --config=p/secrets --error \
+  local cfg=(--config=p/default --config=p/secrets)
+  local excl=()
+  if [ "${#SEMGREP_EXTRA[@]}" -gt 0 ]; then
+    cfg+=(--config=/rules/first-party-actions.yml)
+    excl+=(--exclude-rule "$MUTABLE_TAG_RULE")
+  fi
+  docker run --rm -v "$SRC:/src" -v "$REPORTS:/reports" ${SEMGREP_EXTRA[@]+"${SEMGREP_EXTRA[@]}"} -w /src "$SEMGREP_IMAGE" \
+    semgrep "${cfg[@]}" ${excl[@]+"${excl[@]}"} --error \
     --sarif --output=/reports/semgrep.sarif /src 2>&1 | tee "$REPORTS/semgrep.txt"
 }
 
@@ -537,11 +572,6 @@ fi
 #
 # Never allowed to affect the result: this is reporting, and a reporting bug
 # must not turn into a scan verdict.
-# GITHUB_ACTION_PATH is only set when this runs as a composite action; fall back
-# to the script's own directory so a direct run (the self-test, or a local
-# reproduction) behaves the same. Unguarded it is an unbound-variable abort
-# under set -u, which would take the whole scan down at the last line.
-ACTION_DIR="${GITHUB_ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 findings_total=0
 if [ -x "$ACTION_DIR/summarize.py" ] && command -v python3 >/dev/null 2>&1; then
   if n="$(REPORTS="$REPORTS" python3 "$ACTION_DIR/summarize.py" "$REPORTS" 2>/dev/null)"; then

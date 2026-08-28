@@ -17,6 +17,15 @@ inputs:
     description: Image reference to scan when scan-image is "true". Must already exist - pass duplo-build's image_uri output rather than rebuilding.
     required: false
     default: ""
+  semgrep-first-party-owners:
+    description: >-
+      Comma-separated GitHub owners treated as first-party for the action-pinning check.
+      semgrep's github-actions-mutable-action-tag rule cannot distinguish action owners, so it
+      flags GitHub's own actions/* as loudly as a stranger's repo - roughly 70% of all semgrep
+      findings across this org. Owners listed here are exempted and the rule is replaced with one
+      that fires only on everyone else. Set to "" to keep the unmodified upstream rule.
+    required: false
+    default: "actions,github"
   path:
     description: Path to scan for IaC, secrets, and SAST.
     required: false
@@ -50,6 +59,7 @@ runs:
       ENFORCE: ${{ inputs.enforce }}
       SCAN_IMAGE: ${{ inputs.scan-image }}
       IMAGE_REF: ${{ inputs.image-ref }}
+      SEMGREP_FIRST_PARTY_OWNERS: ${{ inputs.semgrep-first-party-owners }}
       SCAN_PATH: ${{ inputs.path }}
       REPORT_DIR: ${{ inputs.report-dir }}
     run: $GITHUB_ACTION_PATH/scan.sh
