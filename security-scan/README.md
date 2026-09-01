@@ -26,7 +26,7 @@ Runs IaC misconfig, dependency-CVE, secret, SAST, Dockerfile-lint, SBOM and (opt
 | `mode` | `all`, `source`, or `image`. `both`/`iac` accepted as aliases of `all`/`source`. | No | `all` |
 | `scan-image` | When `true` (and `image-ref` set), also scan the built container image. | No | `false` |
 | `image-ref` | Image reference to scan. Must already exist — pass `duplo-build`'s `image_uri`. | No | `""` |
-| `semgrep-first-party-owners` | Comma-separated GitHub owners exempted from the action-pinning check. `""` keeps the unmodified upstream rule. | No | `actions,github` |
+| `semgrep-first-party-owners` | Comma-separated GitHub owners exempted from the action-pinning check. `""` keeps the unmodified upstream rule. | No | `actions,github,Brookai` |
 | `path` | Path to scan. | No | `.` |
 | `report-dir` | Directory the reports are copied into when the run finishes. | No | `scan-reports` |
 
@@ -163,19 +163,25 @@ reverted the lot, because the work was real and the finding was not.
 So the upstream rule is excluded and replaced with one that fires only on owners outside
 `semgrep-first-party-owners`. Same check, without the noise. Verified behaviour:
 
-| ref | default (`actions,github`) | `actions,github,Brookai` | `""` |
+| ref | default (`actions,github,Brookai`) | `actions,github` | `""` |
 | --- | --- | --- | --- |
 | `actions/checkout@v4` | exempt | exempt | flagged |
 | `github/codeql-action/analyze@v3` | exempt | exempt | flagged |
-| `Brookai/actions/security-scan@main` | **flagged** | exempt | flagged |
+| `Brookai/actions/security-scan@main` | exempt | **flagged** | flagged |
 | `aquasecurity/trivy-action@master` | flagged | flagged | flagged |
 | `actions/cache@0c45773…` (SHA) | exempt | exempt | exempt |
 
-**`Brookai` is deliberately not in the default.** `Brookai/actions/security-scan` runs eight root
-containers with the repo bind-mounted over every repo in the org — it is the highest-value
-supply-chain target in the setup, the rollout already pins it by SHA on purpose, and exempting
-in-org would mean never being told that convention had slipped. Add `Brookai` to the input if you
-would rather take that trade; it is a one-word change in one place.
+**`Brookai` is in the default, and it is a deliberate trade.** `Brookai/actions/security-scan` runs
+eight root containers with the repo bind-mounted over every repo in the org, so it is the
+highest-value supply-chain target in the setup — and exempting in-org means this scan will not tell
+you if an in-org ref goes back to a floating tag. That convention is now held by review rather than
+by a check.
+
+It is in the default anyway because the alternative was worse in practice: the rule fired on every
+repo's own `Brookai/*` refs, and the rollout SHA-pins them on purpose, so the finding was noise on
+top of correct work — the same shape that had `care-nexus` SHA-pin 35 refs and then revert the lot.
+Setting it centrally also beats carrying the same line in 21 repos, which is what a per-repo
+override would have meant. Remove `Brookai` from the input in any repo that would rather be told.
 
 ## Reports
 
