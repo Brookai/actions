@@ -36,6 +36,13 @@ jobs:
       # regressed before.
       - run: security-scan/test/exit-code-contract.sh
       - run: security-scan/test/summary-rendering.sh
+      # Registry-credential delivery. Half of this is flag shape with docker
+      # stubbed; the other half runs the REAL syft and trivy images and asserts
+      # they actually read the config we mount. That second half is the one
+      # that matters - the bug it guards was invisible to review and to a
+      # public-image scan, because it only shows up when a registry asks for
+      # credentials the scanner never looked for.
+      - run: security-scan/test/registry-auth.sh
 
   source:
     name: real source scan
@@ -80,8 +87,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # A public image, so this needs no registry credentials. It exercises the
-      # registry pull path, --image-src remote, and the syft registry: prefix -
-      # everything mode=image does apart from ECR auth.
+      # registry pull path, --image-src remote, and the syft registry: prefix.
+      # It deliberately does NOT cover credential delivery - a public pull
+      # succeeds whether or not the scanner ever read the docker config, which
+      # is exactly why this job stayed green while every real ECR build failed.
+      # registry-auth.sh in the contract job covers that.
       - id: scan
         uses: ./security-scan
         with:
