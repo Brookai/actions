@@ -18,6 +18,7 @@ and this project adheres to
 - security-scan: a `TOOL-ERROR` state distinct from findings, so a scanner that could not run is never reported as one that found something
 - security-scan: trufflehog now also scans **git history**; callers already checked out with `fetch-depth: 0` for it, but only gitleaks ever read it
 - security-scan: `semgrep-first-party-owners` input — semgrep's action-pinning rule cannot distinguish action owners and flagged GitHub's own `actions/*` as loudly as a stranger's repo (~70% of all semgrep findings across the org). It is now replaced with a rule that fires only on owners outside the allowlist
+- security-scan: `Brookai` added to the default `semgrep-first-party-owners`, so in-org refs are exempt from the action-pinning check everywhere without each repo setting the input. The SHA-pinning convention for `Brookai/*` is now held by review rather than by the scan
 - security-scan: the action now uploads the scan reports as a workflow artifact itself, named per invocation. They were previously written, copied into the workspace and discarded unless the caller happened to add its own upload step
 - security-scan: the job summary now **itemises the findings** — severity, rule and `file:line` per scanner, rolled up by rule past 25 — instead of only saying that a scanner found something. Rule and location only; matched values are never printed
 - security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run

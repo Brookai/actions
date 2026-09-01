@@ -129,6 +129,7 @@ jobs:
               steps:
                 - uses: actions/checkout@v4
                 - uses: github/codeql-action/analyze@v3
+                - uses: Brookai/actions/security-scan@main
                 - uses: aquasecurity/trivy-action@master
                 - uses: some-random-org/dodgy-action@v1
                 - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
@@ -150,6 +151,10 @@ jobs:
           # Assert on the owner that was flagged, not the line number - line
           # numbers move whenever the fixture is edited and say nothing about
           # whether the carve-out worked.
+          #
+          # Brookai/actions/security-scan@main is in the fixture on purpose: it is
+          # a mutable in-org tag, so it is the ref that proves the default carries
+          # Brookai. Drop Brookai from the default and this assertion fails.
           owners = set()
           for r in res:
               n = r["locations"][0]["physicalLocation"]["region"]["startLine"]
@@ -159,7 +164,7 @@ jobs:
           assert owners == {"aquasecurity", "some-random-org"}, (
               f"expected only third-party owners flagged, got {sorted(owners)}")
           assert rules == {"mutable-third-party-action-tag"}, f"unexpected rules: {rules}"
-          print("ok: actions/*, github/* and the SHA-pinned ref were all exempt")
+          print("ok: actions/*, github/*, the in-org ref and the SHA-pinned ref were all exempt")
           PY
 
   unreachable-image:

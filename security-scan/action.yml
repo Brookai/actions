@@ -29,8 +29,10 @@ inputs:
       flags GitHub's own actions/* as loudly as a stranger's repo - roughly 70% of all semgrep
       findings across this org. Owners listed here are exempted and the rule is replaced with one
       that fires only on everyone else. Set to "" to keep the unmodified upstream rule.
+      Brookai is in the default: in-org refs are held to the SHA-pinning convention by review
+      rather than by this check. Drop it from the input to have them flagged again.
     required: false
-    default: "actions,github"
+    default: "actions,github,Brookai"
   path:
     description: Path to scan for IaC, secrets, and SAST.
     required: false
