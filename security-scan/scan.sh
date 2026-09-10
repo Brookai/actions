@@ -291,6 +291,18 @@ scan_trufflehog_fs() {
     filesystem /src --results=verified --fail 2>&1 | tee "$REPORTS/trufflehog-fs.txt"
 }
 
+scan_trufflehog_db_uris() {
+  echo "==> trufflehog (database connection strings it could not verify — working tree)"
+  # A DB URI is verified by connecting to the DB, which the runners cannot do,
+  # so the verified pass never reports one. unknown = "could not connect";
+  # verified hits stay with the pass above. Advisory only - see record_advisory.
+  # Do not add this to the git-history pass: rotated strings in history would
+  # warn on every run with no way to clear them.
+  docker run --rm -v "$SRC:/src" -w /src "$TRUFFLEHOG_IMAGE" \
+    filesystem /src --results=unknown --include-detectors=MongoDB,Postgres,JDBC --fail \
+    2>&1 | tee "$REPORTS/trufflehog-db-uris.txt"
+}
+
 scan_trufflehog_git() {
   echo "==> trufflehog (verified secrets — git history)"
   # The callers all check out with fetch-depth: 0 and the comment on that line
@@ -492,6 +504,26 @@ record() {
   fi
 }
 
+# Warn-only, whatever enforce says. Not record(): under enforce=true that turns
+# findings and tool errors into FAIL. Touches neither fail nor tool_errors.
+record_advisory() {
+  local name="$1" rc="$2" findings_rc="$3" report="$4" n what
+
+  if [ "$rc" -eq 0 ]; then
+    SUMMARY+=("PASS  $name")
+  elif [ "$rc" -eq "$findings_rc" ]; then
+    # one "Detector Type:" line per result; count only, this goes in the job summary
+    n="$(grep -c '^Detector Type: ' "$REPORTS/$report" 2>/dev/null)"
+    case "$n" in
+      (''|0|*[!0-9]*) what="findings" ;;
+      (*)             what="$n connection string(s)" ;;
+    esac
+    SUMMARY+=("WARN  $name ($what — could not be verified from this runner; advisory, never blocks — see README triage)")
+  else
+    SUMMARY+=("WARN  $name (exit $rc — failed to run, NOT a finding; advisory, never blocks)")
+  fi
+}
+
 if [ "$run_source" -eq 1 ]; then
 
 # --- IaC misconfig ---
@@ -503,6 +535,7 @@ scan_trivy_fs;     record "trivy-sca"    $? warn 7 "trivy-sca.json"
 
 # --- secrets (always hard-fail on a hit) ---
 scan_trufflehog_fs;  record "trufflehog-fs"  $? secret 183
+scan_trufflehog_db_uris; record_advisory "trufflehog-db-uris" $? 183 "trufflehog-db-uris.txt"
 # A .git directory is not enough: a repo that has been init'd but never
 # committed has no index, and trufflehog exits 1 with "failed to read index
 # file" - a tool error that is really just "there is no history here". Check for
