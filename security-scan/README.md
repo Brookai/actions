@@ -77,8 +77,8 @@ Start with `enforce: "false"` so the scan surfaces findings without blocking mer
 
 ```bash
 docker run --rm -v "$PWD:/src" -w /src \
-  trufflesecurity/trufflehog@sha256:75c79b95b2d1f9b54c85b2cba14a7b9baa37bed0835485d6541de64f0fd667bb \
-  filesystem /src --results=verified,unknown,unverified --include-detectors=MongoDB,Postgres,JDBC
+  trufflesecurity/trufflehog@sha256:562bc231afa9de3d04de44cfe624252b08207de1fc3cebc5e7ed92bed7f279e4 \
+  filesystem /src --results=verified,unknown,unverified --include-detectors=MongoDB,Postgres,JDBC --no-update
 ```
 
 - `Found verified result` -> live. Rotate it.

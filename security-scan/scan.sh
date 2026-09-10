@@ -70,7 +70,9 @@ TRIVY_CACHE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/trivy-cache.XXXXXX")"
 # repo can move bridgecrew/checkov:3.2.334 to different content at any time,
 # and these containers run as root with the repo bind-mounted, network access,
 # and (for the wiz step in the same job) credentials in the job environment.
-# The digest is the only pin that actually pins.
+# The digest pins the image, not what a tool fetches once it is running:
+# trufflehog replaces itself with its latest release unless it gets
+# --no-update, which is why every trufflehog call below passes it.
 #
 # To bump: docker manifest inspect <image>:<tag> and take the digest, or
 #   curl -sI -H "Authorization: Bearer $(anon token)" .../manifests/<tag>
@@ -82,7 +84,7 @@ CHECKOV_IMAGE="bridgecrew/checkov@sha256:888060aaaa6f4499fd3b00a1a03185ed760937b
 # (Docker Hub); GHCR keeps the aquasecurity org name and avoids Docker Hub rate limits,
 # which matter here since every scanner in this file is a container pull.
 TRIVY_IMAGE="ghcr.io/aquasecurity/trivy@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7"     # 0.58.1
-TRUFFLEHOG_IMAGE="trufflesecurity/trufflehog@sha256:75c79b95b2d1f9b54c85b2cba14a7b9baa37bed0835485d6541de64f0fd667bb" # 3.88.0
+TRUFFLEHOG_IMAGE="trufflesecurity/trufflehog@sha256:562bc231afa9de3d04de44cfe624252b08207de1fc3cebc5e7ed92bed7f279e4" # 3.97.4
 GITLEAKS_IMAGE="zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46"        # v8.21.2
 SEMGREP_IMAGE="semgrep/semgrep@sha256:ae27024c16f7848cdbfd49c24ed0b78b13f13b85fcd7b87c679aaa8b0c0dce98"              # 1.99.0
 HADOLINT_IMAGE="hadolint/hadolint@sha256:30a8fd2e785ab6176eed53f74769e04f125afb2f74a6c52aef7d463583b6d45e"           # v2.12.0
@@ -288,7 +290,7 @@ scan_trufflehog_fs() {
   # --fail makes trufflehog exit 183 on results, which is distinct from any
   # exit code it uses for its own failures. Nothing to translate.
   docker run --rm -v "$SRC:/src" -w /src "$TRUFFLEHOG_IMAGE" \
-    filesystem /src --results=verified --fail 2>&1 | tee "$REPORTS/trufflehog-fs.txt"
+    filesystem /src --results=verified --fail --no-update 2>&1 | tee "$REPORTS/trufflehog-fs.txt"
 }
 
 scan_trufflehog_db_uris() {
@@ -299,7 +301,7 @@ scan_trufflehog_db_uris() {
   # Do not add this to the git-history pass: rotated strings in history would
   # warn on every run with no way to clear them.
   docker run --rm -v "$SRC:/src" -w /src "$TRUFFLEHOG_IMAGE" \
-    filesystem /src --results=unknown --include-detectors=MongoDB,Postgres,JDBC --fail \
+    filesystem /src --results=unknown --include-detectors=MongoDB,Postgres,JDBC --fail --no-update \
     2>&1 | tee "$REPORTS/trufflehog-db-uris.txt"
 }
 
@@ -312,7 +314,7 @@ scan_trufflehog_git() {
   # its findings against the live provider. This is the invocation that reads
   # history.
   docker run --rm -v "$SRC:/src" -w /src "$TRUFFLEHOG_IMAGE" \
-    git file:///src --results=verified --fail 2>&1 | tee "$REPORTS/trufflehog-git.txt"
+    git file:///src --results=verified --fail --no-update 2>&1 | tee "$REPORTS/trufflehog-git.txt"
 }
 
 scan_gitleaks() {
