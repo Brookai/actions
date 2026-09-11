@@ -77,10 +77,10 @@ runs:
   #
   # always(), because a failing scan is exactly when you want the reports.
   # The name carries a per-invocation id: several repos run more than one scan
-  # step in a single job and upload-artifact@v4 rejects a duplicate name.
+  # step in a single job and upload-artifact (v4 on) rejects a duplicate name.
   - name: Upload scan reports
     if: always()
-    uses: actions/upload-artifact@v4
+    uses: actions/upload-artifact@v6
     with:
       name: security-scan-${{ steps.scan.outputs.report-id || github.run_id }}
       path: ${{ inputs.path }}/${{ inputs.report-dir }}

@@ -128,7 +128,7 @@ jobs:
 
 The action uploads the reports itself as a `security-scan-<id>` artifact, so no caller needs an
 `upload-artifact` step. The id is per-invocation, because several repos run more than one scan step
-in a single job and `upload-artifact@v4` rejects a duplicate artifact name.
+in a single job and `upload-artifact` (v4 on) rejects a duplicate artifact name.
 
 ### Post-build image scan
 
