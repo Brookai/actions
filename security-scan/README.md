@@ -11,6 +11,7 @@ Runs IaC misconfig, dependency-CVE, secret, SAST, Dockerfile-lint, SBOM and (opt
 | trivy fs | **dependency CVEs (SCA)** — `pom.xml`, `package-lock.json`, `requirements.txt`, `go.mod`, `composer.lock`, `build.gradle*` | warn | no |
 | trufflehog (filesystem) | verified secrets in the working tree | **secret** | no |
 | trufflehog (git) | verified secrets in **git history** | **secret** | no |
+| trufflehog (db uris) | MongoDB / Postgres / JDBC connection strings in the working tree it **could not verify** - see [triage](#triage-secret-findings) | warn, never blocks | no |
 | gitleaks | secrets, working tree + history | **secret** | no |
 | semgrep | SAST (`p/default` + `p/secrets`) | warn | no |
 | hadolint | every Dockerfile in the tree | warn | no |
@@ -67,6 +68,24 @@ Scanners that write a report are additionally checked for having written one: a 
 ### Warn-first → enforce rollout
 
 Start with `enforce: "false"` so the scan surfaces findings without blocking merges. Triage and burn down the backlog, then flip `enforce: "true"`. Secret detection is hard-fail from day one either way. Note that `enforce: "true"` also makes scanner failures blocking — that is deliberate, and the reason the TOOL-ERROR state had to exist before `enforce` was worth setting anywhere.
+
+## Triage: secret findings
+
+**`trufflehog-fs` / `trufflehog-git` - FAIL.** trufflehog tried the credential against its provider and it worked. It's live: rotate it, then remove it. Removing it from the code alone does nothing, it's still in history.
+
+**`trufflehog-db-uris` - WARN, never blocks** (findings or a failure to run, whatever `enforce` says). A MongoDB, Postgres or JDBC connection string trufflehog found but couldn't verify, because the runner can't reach the database. Verify it from a network that can, from the repo root:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src \
+  trufflesecurity/trufflehog@sha256:75c79b95b2d1f9b54c85b2cba14a7b9baa37bed0835485d6541de64f0fd667bb \
+  filesystem /src --results=verified,unknown,unverified --include-detectors=MongoDB,Postgres,JDBC
+```
+
+- `Found verified result` -> live. Rotate it.
+- `Found unverified result` with no `Verification issue` line -> the database rejected it. Dead, remove it from the code.
+- `Found unverified result` with a `Verification issue` line -> still unknown. Treat it as live and rotate it.
+
+**`gitleaks` - FAIL.** Pattern and entropy only, nothing is verified. Check it by hand. A false positive goes in `.gitleaksignore` (one `commit:file:rule-id:line` fingerprint per line) with a `#` comment saying why.
 
 ## Usage
 
