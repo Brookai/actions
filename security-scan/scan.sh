@@ -51,7 +51,7 @@ SRC="$(cd "$SCAN_PATH" && pwd)"
 REPORTS="$(mktemp -d "${RUNNER_TEMP:-/tmp}/security-scan-reports.XXXXXX")"
 # Unique per invocation, written out immediately so it exists even if the scan
 # later fails. It names the uploaded artifact: billy, data-platform and
-# ai-platform each run several scan steps in ONE job, and upload-artifact@v4
+# ai-platform each run several scan steps in ONE job, and upload-artifact (v4 on)
 # hard-errors on a duplicate artifact name, so a fixed name would fail the build
 # of exactly the repos this is meant to protect.
 REPORT_ID="${REPORTS##*.}"
