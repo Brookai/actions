@@ -49,6 +49,9 @@ and this project adheres to
 - security-scan: the trivy scans emit JSON reports rather than console-only output, so their findings can be itemised and baselined
 - The default duploctl version is now `0.4.5` (was `0.3.7`). With 0.3.7, `update_image --wait` on a service fails with `KeyError: 'Name'` whenever the tenant has a pod Duplo didn't create, such as one started with `kubectl run`. Since 2026-10-29 that failed every ai-platform deploy to dev01
 
+### Removed
+- The `ai-helpdesk` action. It called `duploctl ai create_ticket`, which duploctl 0.4.x removed, so it broke when the default moved to `0.4.5`. Nothing in the org used it. Upstream duplocloud/actions has a version ported to the new `ticket` commands if it is needed again
+
 ## [0.0.13] - 2025-09-23
 
 ### Added
