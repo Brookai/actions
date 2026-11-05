@@ -85,4 +85,3 @@ runs:
       name: security-scan-${{ steps.scan.outputs.report-id || github.run_id }}
       path: ${{ inputs.path }}/${{ inputs.report-dir }}
       if-no-files-found: ignore
-      retention-days: 30
