@@ -24,6 +24,7 @@ and this project adheres to
 - security-scan: source SBOM and Dockerfile lint now run on every scan — both sat behind `scan-image`, which no caller sets, so neither had ever run
 
 ### Fixed
+- setup: `mask-account-id` defaults to `false` again. The v6 change to `true` turned account-ID masking on (v4 read the old `'yes'` default as false), and GitHub then drops any job output holding the ECR image URI, so deploys that pass the URI between jobs got no image
 - security-scan: the report upload no longer hard-codes `retention-days: 30`. Repos whose retention limit is lower (14 days across Brookai) logged a "Retention days cannot be greater than the maximum allowed retention" warning on every run; the artifact now takes the repo's own default retention
 - security-scan: the image scanners now receive registry credentials via `DOCKER_CONFIG` pointed at a mounted config directory, instead of a file mounted at `/root/.docker/config.json`. The old form assumed every scanner image runs as root with `HOME=/root` — true for trivy, false for syft, whose image has no `/etc/passwd` and no `/root`, so docker set `HOME=/` and syft read `/.docker/config.json`. It silently authenticated as nobody and every private-registry pull came back `401`. On the first real ECR builds across the fleet (2026-08-28) `trivy-image` scanned normally while `syft-sbom-image` returned `TOOL-ERROR` in every repo. The self-test had missed it because it scans a public image, which needs no credentials
 
